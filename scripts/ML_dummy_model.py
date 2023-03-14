@@ -70,7 +70,7 @@ from sklearn.feature_selection import RFE
 ## FEATURE EXPLANATION
 import shap
 
-shap.initjs()# load JS visualization code to notebook
+shap.initjs() # load JS visualization code to notebook
 #from keras.layers import Activation
 #from keras.layers import BatchNormalization
 #from tensorflow.keras.models import Sequential
@@ -94,8 +94,8 @@ os.chdir(ML_FOLDER)
 feature_engineering=True #without feature engineering the errors are much higher (almost 2x)   
 forecast=True
 fill_nans_target=True
-leads=[1,4,8,12] # check: 12 lead creates quite some nan's in the training data 
-
+leads=[1,4] # check: 12 lead creates quite some nan's in the training data 
+random_split=False
 #%% Define counties & read data
 counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
 df=pd.read_excel('input_data.xlsx', index_col=0)
@@ -433,12 +433,12 @@ for county in counties[0:1]:
             
 
             
-            random_split=False
+
 
             #################################################### split data into training and testing sets ####################################################
 
             
-            if random_split==True:
+            if random_split==False:
                 
                 # Convert to numpy array
                 features_np = np.array(features_l)
@@ -670,9 +670,9 @@ for county in counties[0:1]:
                     # reconstruct dataframe with predictions
                     predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions, 'base1':base1_preds, 'base2': base2_preds, 'base3': base3_preds, 'lr':lr_preds}) # Dataframe with predictions and dates
                     
-                    # plot predictions vs obs 
 
-                    # plot 
+                    ##### plots #####
+                    # Make dir
                     if not os.path.exists(RESULT_FOLDER+'\\plots'):
                         os.makedirs(RESULT_FOLDER+'\\plots')
 
@@ -757,7 +757,7 @@ for county in counties[0:1]:
 # get column names of features_df_full
 col_names=features_df_full.columns
 # get column names of features_df_full that contain a zero (0)
-max_split=input("select max split:")
+max_split=2
 col_names_zero=[col for col in col_names if str(max_split) in col]
 # keep only columns in features_df_full that contain a zero (0)
 features_df_full2=features_df_full[col_names_zero]
