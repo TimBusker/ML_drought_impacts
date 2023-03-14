@@ -1,0 +1,13 @@
+name: ML_env2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - xarray
+  - rasterio
+  - scikit-learn
+  - tensorflow 
+  - lightgbm
+
+
+

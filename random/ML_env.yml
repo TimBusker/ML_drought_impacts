@@ -1,0 +1,38 @@
+name: ML_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - numpy
+  - cfgrib
+  - regionmask
+  - requests
+  - xskillscore
+  - urllib3
+  - matplotlib
+  - pandas
+  - xarray
+  - dask
+  - cartopy
+  - netCDF4
+  - rasterio
+  - geopandas
+  - shapely
+  - pyproj
+  - geojson
+  - pandas
+  - seaborn
+  - pysheds
+  - mapclassify
+  - descartes
+  - openpyxl
+  - scipy
+  - statsmodels
+  - scikit-learn
+  - spyder
+  - tensorflow 
+  - keras
+  - lightgbm
+  - xlsxwriter
+  - xlrd
+

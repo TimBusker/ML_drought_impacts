@@ -1,0 +1,15 @@
+name: ML_env3
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - xarray
+  - cartopy
+  - netCDF4
+  - rasterio
+  - geopandas
+  - seaborn
+  - scipy
+  - statsmodels
+  - scikit-learn
+
