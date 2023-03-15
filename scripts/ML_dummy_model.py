@@ -8,7 +8,7 @@ Created on Mon Jan 23 15:33:24 2023
 
 #%% 
 import os
-import random as python_random
+import baseline2 as python_baseline2
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime 
@@ -131,11 +131,11 @@ df.drop('GP',axis=1, inplace=True)
 
 
 
-stats_df=pd.DataFrame(columns=('county', 'accuracy', 'accuracy_baseline', 'accuracy_random','accuracy_lr', 'var_score','var_score_baseline','var_score_random','var_score_lr', 'mae', 'mae_baseline', 'mae_random','mae_lr', 'mse', 'mse_baseline', 'mse_random', 'mse_lr', 'lead'))
+stats_df=pd.DataFrame(columns=('county', 'accuracy', 'accuracy_baseline', 'accuracy_baseline2','accuracy_lr', 'var_score','var_score_baseline','var_score_baseline2','var_score_lr', 'mae', 'mae_baseline', 'mae_baseline2','mae_lr', 'mse', 'mse_baseline', 'mse_baseline2', 'mse_lr', 'lead'))
 features_df=pd.DataFrame(columns=('county', 'feature', 'feature_imp', 'lead'))             
 features_df_full=pd.DataFrame()
 
-#%% check of data is stationary? https://www.analyticsvidhya.com/blog/2021/06/random-forest-for-time-series-forecasting/
+#%% check of data is stationary? https://www.analyticsvidhya.com/blog/2021/06/baseline2-forest-for-time-series-forecasting/
 result = adfuller(df.FEWS_CS.dropna())
 #print('p-value: %f' % result[1])# <0.05 is ok
 
@@ -220,8 +220,8 @@ for county in counties[0:6]:
         features['FEWS_CS']=features['FEWS_CS'].fillna(method="ffill")
     
 
-    # create dataframe column called 'FEWS_CS_random' with random float numbers (based on min and max of FEWS_CS)
-    #features['FEWS_CS_random']= np.random.uniform(features['FEWS_CS'].min(), features['FEWS_CS'].max(), size=len(features))
+    # create dataframe column called 'FEWS_CS_baseline2' with baseline2 float numbers (based on min and max of FEWS_CS)
+    #features['FEWS_CS_baseline2']= np.baseline2.uniform(features['FEWS_CS'].min(), features['FEWS_CS'].max(), size=len(features))
     
 
     # fill na for indicators (debatable!)
@@ -345,7 +345,10 @@ for county in counties[0:6]:
         features['FEWS_CS_lag4'].fillna((features['FEWS_CS_lag4'].mean()), inplace=True)
         features['FEWS_CS_lag5'].fillna((features['FEWS_CS_lag5'].mean()), inplace=True)    
         features['FEWS_CS_lag6'].fillna((features['FEWS_CS_lag6'].mean()), inplace=True)
-
+        
+        # create a seasonality column, which represents the mean for that specific month (e.g. January), only including the previous months that are already observed (requires a check!)
+        features['FEWS_CS_seasonality']=features.groupby(features.index.month)['FEWS_CS'].transform(lambda x: x.shift(1).expanding().mean())
+        
 
     # One-hot encode the data using pandas get_dummies
     features = pd.get_dummies(features) 
@@ -416,47 +419,52 @@ for county in counties[0:6]:
         
         for lead in leads: 
             features_l= features.copy()
-            cols_shift=list(features_l.columns)
-            cols_shift.remove('FEWS_base')
-            # Shift all columns in cols_shift by 3 months 
-            features_l[cols_shift]=features_l[cols_shift].shift(lead)
             
-            # drop first X rows 
-            features_l=features_l.drop(features_l.index[:lead])
-            labels_l=labels.drop(labels.index[:lead])
-            features_date_l=features_date.drop(features_date.index[:lead])
+            #cols_shift=list(features_l.columns)
+            #cols_shift.remove('FEWS_base')
+            
+            # shift the FEWS_base column of the features dataframe by the lead (1,4,8,12) months. This moves the fews base from the future to the past to test the model in predicting the future
+            features_l['FEWS_base']=features_l['FEWS_base'].shift(-lead)
+            #remove the last X rows based on the lead
+            features_l=features_l.drop(features_l.index[-lead:])
+        
             
 
+            
 
             #################################################### split data into training and testing sets ####################################################
-
-            
-
-                
-            # Convert to numpy array
-            features_np = np.array(features_l)
-            train_features, test_features, train_labels, test_labels = train_test_split(features_l, labels_l, test_size = 0.25) #25% of the data used for testing (38 time steps)   random_state = 42. if random state is not fixed, performance is different each time the code is run.
+            train_features, test_features, train_labels, test_labels = train_test_split(features_l, features_l['FEWS_base'], test_size = 0.25,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
             feature_list2=feature_list.copy()
+
+
+            ############ create original fews_base values in shape of train_features and test_features ############# 
+            fews_base_original=features['FEWS_base']
+            # original fews_base with lead months dropped 
+            fews_base_original_l=fews_base_original.copy()
+            fews_base_original_l=fews_base_original_l.drop(fews_base_original_l.index[-lead:])
             
-            #convert dataframes to numpy arrays
-            features_np = np.array(features_l)
+            # original fews_base of the months present in train features 
+            fews_base_original_train=fews_base_original_l.iloc[:len(train_features)]
+            fews_base_original_test=fews_base_original_l.iloc[-len(test_features):]
+
+            ############ create dates for training and testing set #############
+            train_dates=pd.DataFrame({'day':train_features.index.day, 'month':train_features.index.month, 'year':train_features.index.year})
+            test_dates=pd.DataFrame({'day':test_features.index.day, 'month':test_features.index.month, 'year':test_features.index.year})
+
+            ############ convert to numpy arrays #############
+            train_features_np = np.array(train_features)
+            test_features_np = np.array(test_features)
+            train_labels_np = np.array(train_labels)
+            test_labels_np = np.array(test_labels)
+            fews_base_original_np=np.array(fews_base_original)
+            fews_base_original_l_np=np.array(fews_base_original_l)
+            fews_base_original_train_np=np.array(fews_base_original_train)
+            fews_base_original_test_np=np.array(fews_base_original_test)
+            train_dates_np=np.array(train_dates)
+            test_dates_np=np.array(test_dates)
 
 
-            # time
-            # make train_time and test_time variables by extract time from features_date_l based on length of train_features and test_features
-            train_time=features_date_l.iloc[:len(train_features)]
-            test_time=features_date_l.iloc[len(train_features):]
-
-            
-
-
-
-
-            features_date_np=np.array(features_date_l)
-            train_time_np=np.array(train_time)
-            test_time_np=np.array(test_time)
-            train_features_np=np.array(train_features)
-            test_features_np=np.array(test_features)
+            # Grid specs draft part
 
             # if grid_search==True: 
             #     tss = TimeSeriesSplit(n_splits = 5, test_size=5)# 10-fold cross validation
@@ -479,68 +487,7 @@ for county in counties[0:6]:
             #         train_time_np=np.array(train_time)
             #         test_time_np=np.array(test_time)
 
-            ############################################### Baseline models ###############################################
 
-            # baseline 1: use the last FEWS_base value as prediction for all time steps in the test set
-            
-            # get last FEWS_base value from train_features_np array and substitute all FEWS_base in test_features_np array with this value
-            last_FEWS_base = train_features_np[-1, feature_list2.index('FEWS_base')]
-            
-            # make a 1D array with the last FEWS_base value and with same length as the first axis of the test_features_np array
-            base1_preds= np.zeros(len(test_features_np)) + last_FEWS_base
-
-            # Baseline errors, and display average baseline error
-            base1_errors = abs(base1_preds - test_labels)
-
-
-            # baseline 3 random FEWS_base value between min and max of FEWS_base in train_features_np array
-            # get min and max of FEWS_base in train_features_np array
-            min_FEWS_base = np.min(train_features_np[:, feature_list2.index('FEWS_base')])
-            max_FEWS_base = np.max(train_features_np[:, feature_list2.index('FEWS_base')])
-            # generate random FEWS_base value between min and max of FEWS_base in train_features_np array
-            random_FEWS_base = np.random.uniform(min_FEWS_base, max_FEWS_base, len(test_features_np))
-            
-            # baseline 2: get the month from the train_features_np, calculate the grouped average over these months, use this dataframe to append a new column to the test_features_np array for each specific month as assigned in the test_features_np array
-            if fill_nans_target==True: 
-                # get the month from the train_features_np
-                month = train_time_np[:, list(features_date_l.columns).index('month')]
-                # calculate the grouped average over these months on the numpy array of fews_base
-                grouped = pd.DataFrame(train_features_np[:, feature_list2.index('FEWS_base')], index=month).groupby(month).mean()
-
-                # attach these averages per month in a 1D numpy array with same length as test_features_np array, based on the month assigned for that row in the test_features_np array (first axis)
-                base2_preds= np.zeros(len(test_features_np)) + np.squeeze(grouped.loc[test_time_np[:, list(features_date_l.columns).index('month')]].values)
-                base2_errors = abs(base2_preds - test_labels)
-
-            else: 
-                base2_preds=random_FEWS_base
-                base2_errors = abs(base2_preds - test_labels)
-
-            # add this random FEWS_base value to a new array with the length of test_features_np array
-            base3_preds= np.zeros(len(test_features_np)) + random_FEWS_base
-            base3_errors = abs(base3_preds - test_labels)
-
-            # print (test_features_np[:,test_features_np.shape[1]-1]) # print the last column of the test_features_np array
-
-            # drop FEWS_base variable from the arrays and df's (including feature list)
-            train_features_np = np.delete(train_features_np, feature_list2.index('FEWS_base'), axis=1)
-            test_features_np = np.delete(test_features_np, feature_list2.index('FEWS_base'), axis=1)
-            feature_list2.remove('FEWS_base')
-        
-
-
-
-            ############################################### Linear Regression ###############################################
-            regr = LinearRegression()
-            regr.fit(train_features_np, train_labels)
-            # Make predictions using the testing set
-            lr_preds = regr.predict(test_features_np)
-            lr_errors = abs(lr_preds - test_labels)
-
-            ############################################### Random Forest ###############################################
-
-            # Import the model we are using 
-            rf = RandomForestRegressor(n_estimators = 1000,max_features='auto', n_jobs=-1, max_depth=5, min_samples_leaf=1, min_samples_split=2, random_state=40) # joris also uses max features  max_features='sqrt'
-            
             # from sklearn.model_selection import GridSearchCV
             # import warnings
             # warnings.filterwarnings("ignore") #ignore all warnings in this cell
@@ -557,6 +504,61 @@ for county in counties[0:6]:
             # CV_rf.fit(x_train, y_train)
             
             #rf = RandomForestClassifier(criterion = 'entropy', random_state = 42)
+            
+            
+            ############################################### Baseline models ###############################################
+
+
+            ######################## baseline 1: use the previous FEWS_base value (FEWS_CS_lag1) as prediction for the next time step in the test set
+
+            ############ create original FEWS_CS_lag1 values in shape of train_features #############
+            fews_base_original_lag1=features['FEWS_CS_lag1']
+            # original fews_base_lag1 with lead months dropped
+            fews_base_original_lag1_l=fews_base_original_lag1.copy()
+            fews_base_original_lag1_l=fews_base_original_lag1_l.drop(fews_base_original_lag1_l.index[-lead:])
+
+            # original fews_base_lag1 of the months present in train features
+            base1_preds=fews_base_original_lag1_l.iloc[-len(test_features):]
+
+            # Baseline errors, and display average baseline error
+            base1_errors = abs(base1_preds - fews_base_original_test)
+
+            ####################### baseline 2: create seasonality based on previously seen values in 
+
+            # get seasonality from the features dataframe
+            seasonality = features['FEWS_CS_seasonality']
+            # seasonality with lead months dropped
+            seasonality_l=seasonality.copy()
+            seasonality_l=seasonality_l.drop(seasonality_l.index[-lead:])
+            
+            # seasonality of the months present in test features
+            base2_preds=seasonality_l.iloc[-len(test_features):]
+
+            # Baseline errors, and display average baseline error
+            base2_errors = abs(base2_preds - fews_base_original_test)
+
+
+
+        
+            ############################################### Drop fews base vars from datasets ###############################################
+            train_features_np = np.delete(train_features_np, feature_list2.index('FEWS_base'), axis=1)
+            test_features_np = np.delete(test_features_np, feature_list2.index('FEWS_base'), axis=1)
+            feature_list2.remove('FEWS_base')
+
+            ############################################### Linear Regression ###############################################
+
+            regr = LinearRegression()
+            regr.fit(train_features_np, train_labels)
+            # Make predictions using the testing set
+            lr_preds = regr.predict(test_features_np)
+            lr_errors = abs(lr_preds - test_labels)
+
+            ############################################### Random Forest ###############################################
+
+            # Import the model we are using 
+            rf = RandomForestRegressor(n_estimators = 1000,max_features='auto', n_jobs=-1, max_depth=5, min_samples_leaf=1, min_samples_split=2, random_state=40) # joris also uses max features  max_features='sqrt'
+            
+
             # Train the model on training data
             model=rf.fit(train_features_np, train_labels)
             param_search = {'n_estimators' : [10, 100]}
@@ -564,49 +566,49 @@ for county in counties[0:6]:
             #gsearch = GridSearchCV(estimator=rf, cv=tss, param_grid=param_search)
             #gsearch.fit(train_features_np, train_labels)
             # Use the forest's predict method on the test data
-            predictions = rf.predict(test_features_np)
+            predictions = rf.predict(test_features_np) ## rf predictions for the months with lead ahead 
 
 
             ############################################### Evaluate ###############################################
 
             # Calculate the absolute errors
-            errors = abs(predictions - test_labels)
+            errors = abs(predictions - test_labels) # CONTINUE HERE! PREDICTIONS SHOULD BE EVALUATED FOR THE TEST LABELS WITH X MONTHS LEAD LATER! 
 
             # Calculate mean absolute percentage error (MAPE) 
             mape = 100 * (errors / test_labels)
-            mape_baseline= 100 * (base2_errors / test_labels)
-            mape_random= 100 * (base3_errors / test_labels)
+            mape_baseline1= 100 * (base1_errors / test_labels)
+            mape_baseline2= 100 * (base2_errors / test_labels)
             mape_lr= 100 * (lr_errors / test_labels)
             # Calculate and display accuracy
             accuracy = 100 - np.mean(mape)
-            accuracy_baseline= 100 - np.mean(mape_baseline)
-            accuracy_random= 100 - np.mean(mape_random)
+            accuracy_baseline= 100 - np.mean(mape_baseline1)
+            accuracy_baseline2= 100 - np.mean(mape_baseline2)
             accuracy_lr= 100 - np.mean(mape_lr)
 
             # calculate other scores to evaluate continous variables 
 
             # Explained variance score: 1 is perfect prediction
             var_score = r2_score(test_labels, predictions)
-            var_score_baseline= r2_score(test_labels, base2_preds)
-            var_score_random= r2_score(test_labels, base3_preds)
+            var_score_baseline= r2_score(test_labels, base1_preds)
+            var_score_baseline2= r2_score(test_labels, base2_preds)
             var_score_lr= r2_score(test_labels, lr_preds)
 
             # Mean absolute error
             mae = mean_absolute_error(test_labels, predictions)
-            mae_baseline= mean_absolute_error(test_labels, base2_preds)
-            mae_random= mean_absolute_error(test_labels, base3_preds)
+            mae_baseline= mean_absolute_error(test_labels, base1_preds)
+            mae_baseline2= mean_absolute_error(test_labels, base2_preds)
             mae_lr= mean_absolute_error(test_labels, lr_preds)
 
             # Mean squared error
             mse = mean_squared_error(test_labels, predictions)
-            mse_baseline= mean_squared_error(test_labels, base2_preds)
-            mse_random= mean_squared_error(test_labels, base3_preds)
+            mse_baseline= mean_squared_error(test_labels, base1_preds)
+            mse_baseline2= mean_squared_error(test_labels, base2_preds)
             mse_lr= mean_squared_error(test_labels, lr_preds)
 
             # Root mean squared error   
             rmse = np.sqrt(mean_squared_error(test_labels, predictions))
             rmse_baseline= np.sqrt(mean_squared_error(test_labels, base2_preds))
-            rmse_random= np.sqrt(mean_squared_error(test_labels, base3_preds))
+            rmse_baseline2= np.sqrt(mean_squared_error(test_labels, base2_preds))
             rmse_lr= np.sqrt(mean_squared_error(test_labels, lr_preds))
 
 
@@ -638,37 +640,15 @@ for county in counties[0:6]:
 
             
             ############################################### Plotting section ###############################################
-            
-            # reconstruct dataframe with true values 
-            months = features_date_np[:, 1]
-            days = features_date_np[:, 0]
-            years = features_date_np[:, 2]
-            
-            # List and then convert to datetime object
-            dates = [str(int(year)) + '-' + str(int(month)) + '-' + str(int(day)) for year, month, day in zip(years, months, days)]
-            dates = [datetime.datetime.strptime(date, '%Y-%m-%d') for date in dates]
-            
-            # Dataframe with true values and dates
-            true_data = pd.DataFrame(data = {'date': dates, 'FEWS_CS': labels_l})# Dates of predictions
 
-
-            # reconstruct dataframe with test values 
-            months = test_time_np[:, 1]
-            days = test_time_np[:, 0]
-            years = test_time_np[:, 2]# Column of dates
-            test_dates = [str(int(year)) + '-' + str(int(month)) + '-' + str(int(day)) for year, month, day in zip(years, months, days)]# Convert to datetime objects
-            test_dates = [datetime.datetime.strptime(date, '%Y-%m-%d') for date in test_dates]
-            
-            # reconstruct dataframe with predictions
-            predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions, 'base1':base1_preds, 'base2': base2_preds, 'base3': base3_preds, 'lr':lr_preds}) # Dataframe with predictions and dates
-            
-
-            ##### plots #####
+                        
+            ################# Plot feature importances #################
             # Make dir
             if not os.path.exists(RESULT_FOLDER+'\\plots'):
                 os.makedirs(RESULT_FOLDER+'\\plots')
 
             os.chdir(RESULT_FOLDER+'\\plots')
+
             #  Variable importances
             forest_importances = pd.Series(importances, index=feature_list2)
 
@@ -681,45 +661,85 @@ for county in counties[0:6]:
             ax.set_ylim(0,1)    
             fig.tight_layout()
             plt.savefig('Variable_Importances_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
+            plt.show()
             plt.close()
-            # save plot
-            #Make dir
+
+            ################# reconstruct dataframe with predictions #################
+            months = test_dates_np[:, 1]
+            days = test_dates_np[:, 0]
+            years = test_dates_np[:, 2]# Column of dates
+            test_dates = [str(int(year)) + '-' + str(int(month)) + '-' + str(int(day)) for year, month, day in zip(years, months, days)]# Convert to datetime objects
+            test_dates = [datetime.datetime.strptime(date, '%Y-%m-%d') for date in test_dates]
+            
+            predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions, 'base1':base1_preds, 'base2': base2_preds, 'base3': base3_preds, 'lr':lr_preds}) # Dataframe with predictions and dates
+
+            ################# Plot predictions #################
+            
+            ####### observations (target+ 2 most important features)
+            #extract names from 2 most important features from feature importance tuples 
+            feature1, feature2=feature_importances[0][0], feature_importances[1][0]
+            obs=features[['FEWS_base',feature1,feature2]]
 
             fig, ax = plt.subplots(figsize=(10, 5))
             ax2=ax.twinx()
+
             # Plot the actual values
-            ax.plot(true_data['date'], true_data['FEWS_CS'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
-            
-            # plot features 
+            ax.plot(obs.index, obs['FEWS_base'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
             
             # plot rf predictions
             ax.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'Random Forest prediction')
             # plot base predictions
-            #plt.plot(predictions_data['date'], predictions_data['base1'], 'go', label = 'base1 prediction (current = future)')
-            #ax.plot(predictions_data['date'], predictions_data['base2'], 'yo', label = 'baseline prediction (past seasonality= future)')
-            #plt.plot(predictions_data['date'], predictions_data['base3'], 'ko', label = 'base3 prediction (future is random)')
+            plt.plot(predictions_data['date'], predictions_data['base1'], 'go', label = 'base1 prediction (current = future)')
+            ax.plot(predictions_data['date'], predictions_data['base2'], 'yo', label = 'baseline prediction (past seasonality= future)')
+            plt.plot(predictions_data['date'], predictions_data['base3'], 'ko', label = 'base3 prediction (future is random)')
             #plot lr predictions
-            #ax.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
+            ax.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
             plt.xticks(rotation = '60'); 
-            plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('FEWS observations vs RF predictions for %s. Accuracy=%s'%(county,round(accuracy, 2)));
-            #plt.savefig('TS_%s_S%s_L%s.png'%(county,split,lead), dpi=300, bbox_inches='tight')
-            
-            
-            # plot features
-            true_data['SPI6'] = features_np[:, feature_list2.index('SPI6')]
-            true_data['SPI12'] = features_np[:, feature_list2.index('SPI12')]
-            ax2.plot(true_data['date'], true_data['SPI6'], 'o-', color='orange', label = 'SPI6')# Plot the predicted values
-            ax2.plot(true_data['date'], true_data['SPI12'], 'o-', color='black', label = 'SPI12')# Plot the predicted values
+            plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('FEWS observations vs RF predictions for L=%s, county= %s. Accuracy=%s'%(lead,county,round(accuracy, 2)));
             plt.legend()# Graph labels
+            plt.savefig('TS_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
             plt.show() 
             plt.close()
+
+
+            ################# Plot explanatory line graph #################
+
+
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax2=ax.twinx()
+            
+            # Plot the actual values
+            ax.plot(obs.index, obs['FEWS_base'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
+            # plot rf predictions
+            ax.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'random Forest prediction')
+            
+            # plot base predictions
+
+            # plot features
+            ax2.plot(obs.index, obs[feature1], 'o-', color='orange', label = feature1)# Plot the predicted values
+            ax2.plot(obs.index, obs[feature2], 'o-', color='black', label = feature2)# Plot the predicted values
+            
+            plt.xticks(rotation = '60'); 
+            plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(county,lead,round(accuracy, 2)));
+            plt.legend()
+            plt.savefig('Explanatory_plot_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
+            
+            plt.show() 
+            plt.close()
+
+
+
+
+
+
+
 
             # plot ROC curve 
             # Calculate the false positive rates and true positive rates
             # fpr, tpr, _ = roc_curve(test_labels, predictions)# Plot of a ROC curve for a specific class
             # plt.figure()
             # plt.plot(fpr, tpr, label='ROC curve (area = %0.2f)' % roc_auc)
-            # plt.plot([0, 1], [0, 1], 'k--')# Random guesses should fall in the middle
+            # plt.plot([0, 1], [0, 1], 'k--')# baseline2 guesses should fall in the middle
             # plt.xlim([0.0, 1.0])# Limit the graph
             # plt.ylim([0.0, 1.05])# Label the graph
             # plt.xlabel('False Positive Rate')
@@ -730,7 +750,7 @@ for county in counties[0:6]:
             # plt.show()
 
             # make a evaluation dataframe (with baseline being the prediction based on observed clim)
-            var_list= [county,round(accuracy, 2), round(accuracy_baseline, 2), round(accuracy_random, 2), round(accuracy_lr,2), round(var_score, 2), round(var_score_baseline, 2),round(var_score_random, 2), round(var_score_lr,2), round(mse,2), round(mse_baseline,2), round(mse_random,2), round(mse_lr,2), round(mae,2), round(mae_baseline,2), round(mae_random,2), round(mae_lr,2),lead]         
+            var_list= [county,round(accuracy, 2), round(accuracy_baseline, 2), round(accuracy_baseline2, 2), round(accuracy_lr,2), round(var_score, 2), round(var_score_baseline, 2),round(var_score_baseline2, 2), round(var_score_lr,2), round(mse,2), round(mse_baseline,2), round(mse_baseline2,2), round(mse_lr,2), round(mae,2), round(mae_baseline,2), round(mae_baseline2,2), round(mae_lr,2),lead]         
             stats_df.loc[len(stats_df), :] = var_list
 
             # make a features df
@@ -780,15 +800,15 @@ plt.close()
 
 ############################################## evaluation plots ####################################
 # convert all negative values in the df to zero 
-column_names_eval = ['accuracy', 'accuracy_baseline', 'accuracy_random', 'accuracy_lr', 'var_score', 'var_score_baseline', 'var_score_random', 'var_score_lr', 'mse', 'mse_baseline', 'mse_random', 'mse_lr', 'mae', 'mae_baseline', 'mae_random', 'mae_lr']
+column_names_eval = ['accuracy', 'accuracy_baseline', 'accuracy_baseline2', 'accuracy_lr', 'var_score', 'var_score_baseline', 'var_score_baseline2', 'var_score_lr', 'mse', 'mse_baseline', 'mse_baseline2', 'mse_lr', 'mae', 'mae_baseline', 'mae_baseline2', 'mae_lr']
 
 for column in column_names_eval:
     stats_df.loc[stats_df[column]<0, column]=0
 
-var_vars=['var_score', 'var_score_baseline', 'var_score_random', 'var_score_lr']
-mse_vars=['mse', 'mse_baseline', 'mse_random', 'mse_lr']
-mae_vars=['mae', 'mae_baseline', 'mae_random', 'mae_lr']
-accuracy_vars=['accuracy', 'accuracy_baseline', 'accuracy_random', 'accuracy_lr']
+var_vars=['var_score', 'var_score_baseline', 'var_score_baseline2', 'var_score_lr']
+mse_vars=['mse', 'mse_baseline', 'mse_baseline2', 'mse_lr']
+mae_vars=['mae', 'mae_baseline', 'mae_baseline2', 'mae_lr']
+accuracy_vars=['accuracy', 'accuracy_baseline', 'accuracy_baseline2', 'accuracy_lr']
 
 # plot var scores (var_vars) for all counties for all leads 
 for lead in leads:

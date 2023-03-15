@@ -1,37 +1,37 @@
 ,county,feature,feature_imp,lead
-0,Garissa,wd_roll_mean_12,0.4,1
-1,Garissa,wd_roll_mean_12,0.28,2
-2,Garissa,SPI12,0.22,3
-3,Garissa,SPI6,0.18,4
-4,Garissa,FEWS_CS_lag6,0.15,8
-5,Garissa,FEWS_CS_lag3,0.1,12
-6,Isiolo,FEWS_CS_lag1,0.6,1
-7,Isiolo,NDVI_roll_mean_12,0.39,2
-8,Isiolo,SPI12,0.15,3
-9,Isiolo,SPI6,0.17,4
-10,Isiolo,NDVI_crop_roll_mean_12,0.12,8
-11,Isiolo,NDVI_crop_roll_mean_12,0.25,12
-12,Mandera,SPI12,0.22,1
-13,Mandera,SPI24,0.36,2
-14,Mandera,SPI24,0.33,3
-15,Mandera,SPI24,0.25,4
-16,Mandera,maize_price_roll_mean_12,0.18,8
-17,Mandera,maize_price_roll_mean,0.21,12
-18,Marsabit,FEWS_CS_lag1,0.53,1
-19,Marsabit,FEWS_CS_lag1,0.52,2
-20,Marsabit,SPI12,0.2,3
-21,Marsabit,SPI6,0.29,4
-22,Marsabit,maize_price_roll_mean,0.42,8
-23,Marsabit,maize_price,0.47,12
-24,Samburu,FEWS_CS_lag1,0.26,1
-25,Samburu,SPI12,0.18,2
-26,Samburu,SPI12,0.3,3
-27,Samburu,SPI12,0.31,4
+0,Garissa,FEWS_CS_lag1,0.32,1
+1,Garissa,wd_roll_mean_12,0.25,2
+2,Garissa,wd_roll_mean_12,0.17,3
+3,Garissa,SPI12,0.32,4
+4,Garissa,FEWS_CS_lag6,0.16,8
+5,Garissa,FEWS_CS_lag4,0.21,12
+6,Isiolo,FEWS_CS_lag1,0.33,1
+7,Isiolo,FEWS_CS_lag1,0.26,2
+8,Isiolo,NDVI_range_roll_mean_12,0.16,3
+9,Isiolo,NDVI_range_roll_mean,0.19,4
+10,Isiolo,wd_roll_mean_12,0.17,8
+11,Isiolo,wd_roll_mean_12,0.28,12
+12,Mandera,FEWS_CS_lag1,0.3,1
+13,Mandera,SPI24,0.33,2
+14,Mandera,SPI24,0.39,3
+15,Mandera,SPI24,0.42,4
+16,Mandera,SPI3,0.24,8
+17,Mandera,maize_price_roll_mean,0.22,12
+18,Marsabit,FEWS_CS_lag1,0.62,1
+19,Marsabit,FEWS_CS_lag1,0.37,2
+20,Marsabit,SPI12,0.17,3
+21,Marsabit,SPI6,0.46,4
+22,Marsabit,maize_price_roll_mean,0.41,8
+23,Marsabit,maize_price,0.34,12
+24,Samburu,FEWS_CS_lag1,0.42,1
+25,Samburu,SPI12,0.19,2
+26,Samburu,SPI12,0.43,3
+27,Samburu,SPI12,0.33,4
 28,Samburu,SPI6,0.21,8
-29,Samburu,wd_roll_mean_12,0.11,12
-30,Tana River,NDVI_range_roll_mean_12,0.28,1
-31,Tana River,NDVI_range_roll_mean_12,0.39,2
-32,Tana River,SPI12,0.39,3
-33,Tana River,SPI12,0.45,4
-34,Tana River,SPI3,0.15,8
-35,Tana River,MUAC,0.19,12
+29,Samburu,wd_roll_mean_12,0.18,12
+30,Tana River,NDVI_range_roll_mean_12,0.29,1
+31,Tana River,NDVI_range_roll_mean_12,0.35,2
+32,Tana River,SPI12,0.33,3
+33,Tana River,SPI12,0.4,4
+34,Tana River,SPI6,0.12,8
+35,Tana River,FEWS_CS_lag2,0.16,12
