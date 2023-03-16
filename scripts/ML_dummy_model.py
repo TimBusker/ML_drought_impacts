@@ -8,7 +8,7 @@ Created on Mon Jan 23 15:33:24 2023
 
 #%% 
 import os
-import baseline2 as python_baseline2
+import random as python_random
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime 
@@ -16,13 +16,11 @@ import pandas as pd
 import seaborn as sns
 os.chdir('C:\\Users\\tbr910\\Documents\\Forecast_action_analysis')
 
-#with rasterio.open(os.path.join(DATA_FOLDER, 'data.tif'), 'r') as src
 from ML_functions import *
 
 #%% Machine learning model training
 #import tensorflow as tf`
 from sklearn.linear_model import LinearRegression
-
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -91,45 +89,12 @@ os.chdir(ML_FOLDER)
 feature_engineering=True #without feature engineering the errors are much higher (almost 2x)   
 forecast=True
 fill_nans_target=True
-leads=[1,2,3,4,8,12] # check: 12 lead creates quite some nan's in the training data 
+leads=[0,1,2,4,8,12] # check: 12 lead creates quite some nan's in the training data 
 random_split=False
 #%% Define counties & read data
 counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
 df=pd.read_excel('input_data.xlsx', index_col=0)
 df.drop('GP',axis=1, inplace=True)
-
-
-
-
-
-
-
-
-
-
-
-
-# for county in counties: 
-#     county=county
-
-#     # select isiolo as county 
-#     df_county=df[df['county']==county]
-
-#     # linear imputation FEWS in between the not nan values 
-#     df_county['FEWS_CS_INT']=df_county['FEWS_CS'].interpolate(method='time',limit_area='inside')
-
-#     # plot interpolated FEWS_CS for one county
-
-#     fig=plt.figure(figsize=(10,5))
-
-#     # scatterplot of FEWS_CS and FEWS_CS_INT
-#     df_scatter=df_county[['FEWS_CS','FEWS_CS_INT']]
-#     plt.scatter(df_scatter.index,df_scatter['FEWS_CS_INT'], color='blue')
-#     plt.scatter(df_scatter.index,df_scatter['FEWS_CS'], color='red')
-#     plt.show() 
-
-
-
 
 stats_df=pd.DataFrame(columns=('county', 'accuracy', 'accuracy_baseline', 'accuracy_baseline2','accuracy_lr', 'var_score','var_score_baseline','var_score_baseline2','var_score_lr', 'mae', 'mae_baseline', 'mae_baseline2','mae_lr', 'mse', 'mse_baseline', 'mse_baseline2', 'mse_lr', 'lead'))
 features_df=pd.DataFrame(columns=('county', 'feature', 'feature_imp', 'lead'))             
@@ -166,6 +131,8 @@ food_prices.index=pd.to_datetime(food_prices.index)
 food_prices.index=food_prices.index.to_period('M').to_timestamp('D', 'start')
 
 
+
+
 ######################  population ###################### https://data.humdata.org/dataset/kenya-population-statistics-2019
 
 # population= pd.read_excel('ken_admpop_2019.xlsx',sheet_name='ken_admpop_ADM1_2019',index_col=0, header=0)
@@ -179,14 +146,8 @@ feature_names=pd.DataFrame(df.columns, columns=['feature'])
 
 #%% loop over counties  
 
-for county in counties[0:6]: 
-
-
-
-    print(county)
-    # construct the dataset 
-    
-    county=county
+for county in counties[0:10]: 
+    print (county)
     features= df[df['county']==county]#['FEWS_CS']#[~df['FEWS_CS'].isnull()]
 
     ############################################# Merge extra SE data #############################################
@@ -295,7 +256,7 @@ for county in counties[0:6]:
     # drop nan values when whole column is nan (CROP column)
     features.dropna(axis=1, how='all', inplace=True)
 
-    # drop nan values (values outside of the date range of the FEWS data)
+    # drop nan values in FEWS_CS columnm (drops everything before 2009, start of FEWS dataset)
     features=features[~features['FEWS_CS'].isna()] #keep only not nan values 
 
 
@@ -348,7 +309,8 @@ for county in counties[0:6]:
         
         # create a seasonality column, which represents the mean for that specific month (e.g. January), only including the previous months that are already observed (requires a check!)
         features['FEWS_CS_seasonality']=features.groupby(features.index.month)['FEWS_CS'].transform(lambda x: x.shift(1).expanding().mean())
-        
+        # fill nan values of FEWS_CS_seasonality with the mean of the whole column
+        features['FEWS_CS_seasonality'].fillna((features['FEWS_CS_seasonality'].mean()), inplace=True)
 
     # One-hot encode the data using pandas get_dummies
     features = pd.get_dummies(features) 
@@ -426,7 +388,8 @@ for county in counties[0:6]:
             # shift the FEWS_base column of the features dataframe by the lead (1,4,8,12) months. This moves the fews base from the future to the past to test the model in predicting the future
             features_l['FEWS_base']=features_l['FEWS_base'].shift(-lead)
             #remove the last X rows based on the lead
-            features_l=features_l.drop(features_l.index[-lead:])
+            if lead!=0:
+                features_l=features_l.drop(features_l.index[-lead:])
         
             
 
@@ -441,7 +404,8 @@ for county in counties[0:6]:
             fews_base_original=features['FEWS_base']
             # original fews_base with lead months dropped 
             fews_base_original_l=fews_base_original.copy()
-            fews_base_original_l=fews_base_original_l.drop(fews_base_original_l.index[-lead:])
+            if lead!=0:
+                fews_base_original_l=fews_base_original_l.drop(fews_base_original_l.index[-lead:])
             
             # original fews_base of the months present in train features 
             fews_base_original_train=fews_base_original_l.iloc[:len(train_features)]
@@ -511,11 +475,12 @@ for county in counties[0:6]:
 
             ######################## baseline 1: use the previous FEWS_base value (FEWS_CS_lag1) as prediction for the next time step in the test set
 
-            ############ create original FEWS_CS_lag1 values in shape of train_features #############
             fews_base_original_lag1=features['FEWS_CS_lag1']
             # original fews_base_lag1 with lead months dropped
             fews_base_original_lag1_l=fews_base_original_lag1.copy()
-            fews_base_original_lag1_l=fews_base_original_lag1_l.drop(fews_base_original_lag1_l.index[-lead:])
+            if lead!=0:
+                fews_base_original_lag1_l=fews_base_original_lag1_l.drop(fews_base_original_lag1_l.index[-lead:])
+            
 
             # original fews_base_lag1 of the months present in train features
             base1_preds=fews_base_original_lag1_l.iloc[-len(test_features):]
@@ -524,12 +489,12 @@ for county in counties[0:6]:
             base1_errors = abs(base1_preds - fews_base_original_test)
 
             ####################### baseline 2: create seasonality based on previously seen values in 
-
             # get seasonality from the features dataframe
             seasonality = features['FEWS_CS_seasonality']
             # seasonality with lead months dropped
             seasonality_l=seasonality.copy()
-            seasonality_l=seasonality_l.drop(seasonality_l.index[-lead:])
+            if lead!=0:
+                seasonality_l=seasonality_l.drop(seasonality_l.index[-lead:])
             
             # seasonality of the months present in test features
             base2_preds=seasonality_l.iloc[-len(test_features):]
@@ -567,25 +532,27 @@ for county in counties[0:6]:
             #gsearch.fit(train_features_np, train_labels)
             # Use the forest's predict method on the test data
             predictions = rf.predict(test_features_np) ## rf predictions for the months with lead ahead 
-
+            
+            # Calculate the absolute errors
+            errors = abs(predictions - test_labels)
 
             ############################################### Evaluate ###############################################
 
-            # Calculate the absolute errors
-            errors = abs(predictions - test_labels) # CONTINUE HERE! PREDICTIONS SHOULD BE EVALUATED FOR THE TEST LABELS WITH X MONTHS LEAD LATER! 
 
+            ############################# accuracy #############################
             # Calculate mean absolute percentage error (MAPE) 
             mape = 100 * (errors / test_labels)
             mape_baseline1= 100 * (base1_errors / test_labels)
             mape_baseline2= 100 * (base2_errors / test_labels)
             mape_lr= 100 * (lr_errors / test_labels)
+            
             # Calculate and display accuracy
             accuracy = 100 - np.mean(mape)
             accuracy_baseline= 100 - np.mean(mape_baseline1)
             accuracy_baseline2= 100 - np.mean(mape_baseline2)
             accuracy_lr= 100 - np.mean(mape_lr)
 
-            # calculate other scores to evaluate continous variables 
+            ############################# r2 score #############################
 
             # Explained variance score: 1 is perfect prediction
             var_score = r2_score(test_labels, predictions)
@@ -593,19 +560,19 @@ for county in counties[0:6]:
             var_score_baseline2= r2_score(test_labels, base2_preds)
             var_score_lr= r2_score(test_labels, lr_preds)
 
-            # Mean absolute error
+            ############################# mean absolute error #############################
             mae = mean_absolute_error(test_labels, predictions)
             mae_baseline= mean_absolute_error(test_labels, base1_preds)
             mae_baseline2= mean_absolute_error(test_labels, base2_preds)
             mae_lr= mean_absolute_error(test_labels, lr_preds)
 
-            # Mean squared error
+            ############################# mean squared error #############################
             mse = mean_squared_error(test_labels, predictions)
             mse_baseline= mean_squared_error(test_labels, base1_preds)
             mse_baseline2= mean_squared_error(test_labels, base2_preds)
             mse_lr= mean_squared_error(test_labels, lr_preds)
 
-            # Root mean squared error   
+            ############################# root mean squared error ############################# 
             rmse = np.sqrt(mean_squared_error(test_labels, predictions))
             rmse_baseline= np.sqrt(mean_squared_error(test_labels, base2_preds))
             rmse_baseline2= np.sqrt(mean_squared_error(test_labels, base2_preds))
@@ -630,8 +597,14 @@ for county in counties[0:6]:
             feature_importances = [(feature, round(importance, 2)) for feature, importance in zip(feature_list2, importances)]# Sort the feature importances by most important first
             
             # append featuer importances to df
-            test=pd.DataFrame(importances, index=feature_list2, columns=['importance_%s'%(county)])
-            features_df_full=pd.concat([features_df_full, test], axis=1)
+            # make a dataframe with 3 columns: importance, county, lead. Importances is a np.array. Attach the county and lead to the array and then make a df from it.
+            append= pd.DataFrame(importances, index=feature_list2, columns=['importance'])
+            append['county']=county
+            append['lead']=lead
+            features_df_full=pd.concat([features_df_full, append], axis=0)
+
+
+
             
             # sort feature importances and print most important feature
             feature_importances = sorted(feature_importances, key = lambda x: x[1], reverse = True)
@@ -671,7 +644,7 @@ for county in counties[0:6]:
             test_dates = [str(int(year)) + '-' + str(int(month)) + '-' + str(int(day)) for year, month, day in zip(years, months, days)]# Convert to datetime objects
             test_dates = [datetime.datetime.strptime(date, '%Y-%m-%d') for date in test_dates]
             
-            predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions, 'base1':base1_preds, 'base2': base2_preds, 'base3': base3_preds, 'lr':lr_preds}) # Dataframe with predictions and dates
+            predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions, 'base1':base1_preds, 'base2': base2_preds,'lr':lr_preds}) # Dataframe with predictions and dates
 
             ################# Plot predictions #################
             
@@ -680,23 +653,26 @@ for county in counties[0:6]:
             feature1, feature2=feature_importances[0][0], feature_importances[1][0]
             obs=features[['FEWS_base',feature1,feature2]]
 
+
+            ################# Convert predictions (rf+lr) to original time series (shift X rows forward based on lead time) #################
+            # convert predictions to original time series
+            predictions_data['prediction']=predictions_data['prediction'].shift(lead)
+            predictions_data['lr']=predictions_data['lr'].shift(lead)
             fig, ax = plt.subplots(figsize=(10, 5))
-            ax2=ax.twinx()
 
             # Plot the actual values
-            ax.plot(obs.index, obs['FEWS_base'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
+            plt.plot(obs.index, obs['FEWS_base'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
             
             # plot rf predictions
-            ax.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'Random Forest prediction')
+            plt.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'Random Forest prediction')
             # plot base predictions
             plt.plot(predictions_data['date'], predictions_data['base1'], 'go', label = 'base1 prediction (current = future)')
-            ax.plot(predictions_data['date'], predictions_data['base2'], 'yo', label = 'baseline prediction (past seasonality= future)')
-            plt.plot(predictions_data['date'], predictions_data['base3'], 'ko', label = 'base3 prediction (future is random)')
+            plt.plot(predictions_data['date'], predictions_data['base2'], 'yo', label = 'baseline prediction (past seasonality= future)')
             #plot lr predictions
-            ax.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
+            plt.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
             plt.xticks(rotation = '60'); 
             plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('FEWS observations vs RF predictions for L=%s, county= %s. Accuracy=%s'%(lead,county,round(accuracy, 2)));
-            plt.legend()# Graph labels
+            plt.legend(loc='best')
             plt.savefig('TS_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
             plt.show() 
             plt.close()
@@ -720,7 +696,7 @@ for county in counties[0:6]:
             ax2.plot(obs.index, obs[feature2], 'o-', color='black', label = feature2)# Plot the predicted values
             
             plt.xticks(rotation = '60'); 
-            plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(county,lead,round(accuracy, 2)));
+            plt.xlabel('Date'); plt.ylabel('most important features'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(county,lead,round(accuracy, 2)));
             plt.legend()
             plt.savefig('Explanatory_plot_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
             
@@ -764,37 +740,44 @@ for county in counties[0:6]:
 
 ################################################# plots ###############################################
 
-############### feature plots ####################
-# keep only columns in feature_df_full from which the column name contains a zero (0)
-# get column names of features_df_full
-col_names=features_df_full.columns
 
-# keep only columns in features_df_full that contain a zero (0)
-features_df_full2=features_df_full[col_names]
-# delete all rows with full nan values 
-features_df_full2=features_df_full2.dropna(axis=0, how='any')
+################### feature importance plot per lead time (averaged over counties) ###################
 
-
-# plot features_df_full as bar plot with stdev as error bars 
-means=features_df_full2.mean(axis=1)
-# keep only top 10 features (index) based on mean values 
-means=means.sort_values(ascending=False).head(10)
-# get the stdev of the top 10 features in means 
-stdev=features_df_full2.loc[means.index].std(axis=1)
-
-
-# bar plot of every feature (index of features_df_fu with means and stdev as error bars
 fig=plt.figure(figsize=(10, 5)) 
-plt.bar(means.index, means, yerr=stdev, align='center', alpha=0.5, ecolor='black', capsize=10)
-plt.xticks(means.index, rotation='vertical')
-plt.ylabel('Feature importance')
+# plot feature importance per lead time
+for lead in leads:
+    # get feature importance for lead time
+    features_df_lead=features_df_full[features_df_full['lead']==lead]
+    # reset index 
+    features_df_lead=features_df_lead.reset_index()
+    # get mean feature importance per feature
+    means=features_df_lead.groupby('index').mean()
+    # rename importance column to mean
+    means.rename(columns={'importance':'mean'}, inplace=True)
+    # sort values
+    means=means.sort_values(by='mean', ascending=False)
+    # get stdev of feature importance per feature
+    stdev=features_df_lead.groupby('index').std()
+    # rename importance column to stdev
+    stdev.rename(columns={'importance':'stdev'}, inplace=True)
 
-plt.title('Feature importance for all counties')
-plt.tight_layout()
-# save plot in plots folder
-plt.savefig(RESULT_FOLDER+'\\plots\\Feature_importances_all_counties.png', dpi=300, bbox_inches='tight')
-plt.show()
-plt.close()
+    # merge stdev and mean on column with index as name 
+    means=means.merge(stdev['stdev'], left_index=True, right_index=True)
+    
+    # plot feature importance per lead time
+    plt.figure(figsize=(10, 5))
+    plt.bar(means.index, means['mean'], yerr=means['stdev'], align='center', label='L=%s'%(lead))
+    plt.xticks(rotation = '90');
+    plt.xlabel('Feature'); plt.ylabel('Feature importance'); plt.title('Feature importance for lead: %s'%(lead));
+    
+    # x limite x-axis to 0 and 0.5 
+    plt.ylim(0, means['stdev'].max()+0.2)
+    plt.legend(loc='best')
+    plt.savefig(RESULT_FOLDER+'\\feature_importance_lead_%s.png'%(lead), dpi=300, bbox_inches='tight')
+    plt.show()
+    plt.close()
+
+
 
 
 
@@ -823,9 +806,10 @@ for lead in leads:
     plt.xticks(rotation=90)
     plt.tight_layout()
     # save plot in plots folder
-    plt.savefig(RESULT_FOLDER+'\\plots\\Variance_explained_lead_%s.png'%(lead), dpi=300, bbox_inches='tight')
+    plt.savefig(RESULT_FOLDER+'\\plots\\R2_lead_%s.png'%(lead), dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
+
 # plot mse scores (mse_vars) for all counties for all leads
 for lead in leads:
     # subset stats_df for lead
@@ -844,8 +828,20 @@ for lead in leads:
     plt.close()
 
 
-
-
+# plot var_vars for all leads averaged over all counties 
+# melt the df to get a df with lead, variable and var_score
+stats_df_melt=pd.melt(stats_df, id_vars=['lead'], value_vars=var_vars, var_name='variable', value_name='var_score')
+# plot the df with seaborn, lead on x-axis
+fig=plt.figure(figsize=(10, 5))
+sns.barplot(x='lead', y='var_score', hue='variable', data=stats_df_melt)
+plt.title('Variance explained')
+plt.xticks(rotation=90)
+plt.ylim(0, stats_df_melt['var_score'].max())
+plt.tight_layout()
+# save plot in plots folder
+plt.savefig(RESULT_FOLDER+'\\plots\\R2_all_leads.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
 
 
 

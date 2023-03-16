@@ -1,37 +1,61 @@
 ,county,feature,feature_imp,lead
-0,Garissa,FEWS_CS_lag1,0.32,1
-1,Garissa,wd_roll_mean_12,0.25,2
-2,Garissa,wd_roll_mean_12,0.17,3
-3,Garissa,SPI12,0.32,4
-4,Garissa,FEWS_CS_lag6,0.16,8
-5,Garissa,FEWS_CS_lag4,0.21,12
-6,Isiolo,FEWS_CS_lag1,0.33,1
-7,Isiolo,FEWS_CS_lag1,0.26,2
-8,Isiolo,NDVI_range_roll_mean_12,0.16,3
-9,Isiolo,NDVI_range_roll_mean,0.19,4
-10,Isiolo,wd_roll_mean_12,0.17,8
-11,Isiolo,wd_roll_mean_12,0.28,12
-12,Mandera,FEWS_CS_lag1,0.3,1
-13,Mandera,SPI24,0.33,2
-14,Mandera,SPI24,0.39,3
-15,Mandera,SPI24,0.42,4
-16,Mandera,SPI3,0.24,8
-17,Mandera,maize_price_roll_mean,0.22,12
-18,Marsabit,FEWS_CS_lag1,0.62,1
-19,Marsabit,FEWS_CS_lag1,0.37,2
-20,Marsabit,SPI12,0.17,3
-21,Marsabit,SPI6,0.46,4
-22,Marsabit,maize_price_roll_mean,0.41,8
-23,Marsabit,maize_price,0.34,12
-24,Samburu,FEWS_CS_lag1,0.42,1
-25,Samburu,SPI12,0.19,2
-26,Samburu,SPI12,0.43,3
-27,Samburu,SPI12,0.33,4
-28,Samburu,SPI6,0.21,8
-29,Samburu,wd_roll_mean_12,0.18,12
-30,Tana River,NDVI_range_roll_mean_12,0.29,1
-31,Tana River,NDVI_range_roll_mean_12,0.35,2
-32,Tana River,SPI12,0.33,3
-33,Tana River,SPI12,0.4,4
-34,Tana River,SPI6,0.12,8
-35,Tana River,FEWS_CS_lag2,0.16,12
+0,Garissa,FEWS_CS_lag1,0.57,0
+1,Garissa,wd_roll_mean_12,0.5,1
+2,Garissa,wd_roll_mean_12,0.52,2
+3,Garissa,SPI12,0.14,4
+4,Garissa,FEWS_CS_lag6,0.17,8
+5,Garissa,FEWS_CS_lag4,0.2,12
+6,Isiolo,FEWS_CS_lag1,0.6,0
+7,Isiolo,FEWS_CS_lag1,0.4,1
+8,Isiolo,FEWS_CS_lag1,0.37,2
+9,Isiolo,FEWS_CS_lag1,0.22,4
+10,Isiolo,FEWS_CS_lag1,0.19,8
+11,Isiolo,wd_roll_mean_12,0.29,12
+12,Mandera,FEWS_CS_lag1,0.54,0
+13,Mandera,wd_roll_mean_12,0.16,1
+14,Mandera,SPI24,0.46,2
+15,Mandera,SPI24,0.48,4
+16,Mandera,maize_price_roll_mean_12,0.23,8
+17,Mandera,maize_price_roll_mean,0.34,12
+18,Marsabit,FEWS_CS_lag1,0.63,0
+19,Marsabit,FEWS_CS_lag1,0.44,1
+20,Marsabit,SPI24,0.33,2
+21,Marsabit,SPI24,0.49,4
+22,Marsabit,SPI24,0.44,8
+23,Marsabit,maize_price,0.26,12
+24,Samburu,SPI24,0.3,0
+25,Samburu,SPI24,0.25,1
+26,Samburu,SPI12,0.38,2
+27,Samburu,SPI12,0.45,4
+28,Samburu,SPI6,0.27,8
+29,Samburu,FEWS_CS_roll_mean,0.18,12
+30,Tana River,FEWS_CS_lag1,0.43,0
+31,Tana River,NDVI_range_roll_mean_12,0.24,1
+32,Tana River,SPI12,0.3,2
+33,Tana River,SPI12,0.48,4
+34,Tana River,SPI6,0.23,8
+35,Tana River,NDVI_crop_roll_mean_12,0.15,12
+36,Turkana,FEWS_CS_lag1,0.41,0
+37,Turkana,NDVI_crop_roll_mean_12,0.35,1
+38,Turkana,NDVI_roll_mean_12,0.31,2
+39,Turkana,NDVI_roll_mean_12,0.3,4
+40,Turkana,NDVI_crop_roll_mean,0.13,8
+41,Turkana,NDVI_crop_roll_mean_12,0.18,12
+42,Wajir,FEWS_CS_lag1,0.69,0
+43,Wajir,FEWS_CS_lag1,0.44,1
+44,Wajir,SPI24,0.39,2
+45,Wajir,SPI24,0.59,4
+46,Wajir,SPI6,0.29,8
+47,Wajir,FEWS_CS_seasonality,0.43,12
+48,Baringo,FEWS_CS_lag1,0.42,0
+49,Baringo,maize_price_roll_mean_12,0.27,1
+50,Baringo,NDVI_crop_roll_mean,0.3,2
+51,Baringo,maize_price_roll_mean_12,0.22,4
+52,Baringo,maize_price_roll_mean_12,0.33,8
+53,Baringo,CP,0.16,12
+54,Kajiado,FEWS_CS_lag1,0.45,0
+55,Kajiado,maize_price,0.3,1
+56,Kajiado,maize_price,0.32,2
+57,Kajiado,LDW,0.29,4
+58,Kajiado,ds_roll_mean_12,0.12,8
+59,Kajiado,wd_roll_mean_12,0.18,12
