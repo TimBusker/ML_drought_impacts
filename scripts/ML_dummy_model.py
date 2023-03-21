@@ -146,9 +146,11 @@ feature_names=pd.DataFrame(df.columns, columns=['feature'])
 
 
 
+
+
 #%% loop over counties  
 
-for county in counties[:10]: 
+for county in counties: 
     print (county)
     features= df[df['county']==county]#['FEWS_CS']#[~df['FEWS_CS'].isnull()]
 
@@ -175,10 +177,7 @@ for county in counties[:10]:
     # linear imputation FEWS in between the not nan values 
     #
     
-    if fill_nans_target==False:
-        features=features.dropna(subset=['FEWS_CS'])
-
-    else:
+    if fill_nans_target==True:
         #features['FEWS_CS']=features['FEWS_CS'].interpolate(method='time',limit_area='inside')
         features['FEWS_CS']=features['FEWS_CS'].fillna(method="ffill")
     
@@ -200,7 +199,7 @@ for county in counties[:10]:
 
 
     for ind in all_SE_indicators:
-        features[ind].fillna((features[ind].mean()), inplace=True)
+        features[ind].fillna((features[ind].mean()), inplace=True) # CHECK
 
     # explore the data and correlations with some fancy plots 
 
@@ -251,15 +250,13 @@ for county in counties[:10]:
             features['maize_price_roll_mean_12']=features['maize_price'].rolling(window=12).mean().shift(1)
             
             # fill nan values that came out of rolling for maize price
-            features['maize_price_roll_mean'].fillna((features['maize_price_roll_mean'].mean()), inplace=True)
+            features['maize_price_roll_mean'].fillna((features['maize_price_roll_mean'].mean()), inplace=True)# check: incorrect nan filling. Fill with obs 
             features['maize_price_roll_mean_12'].fillna((features['maize_price_roll_mean_12'].mean()), inplace=True)
 
 
     # drop nan values when whole column is nan (CROP column)
     features.dropna(axis=1, how='all', inplace=True)
 
-    # drop nan values in FEWS_CS columnm (drops everything before 2009, start of FEWS dataset)
-    features=features[~features['FEWS_CS'].isna()] #keep only not nan values 
 
 
     #################################################### Extract MAM and OND seasons ####################################################
@@ -281,45 +278,44 @@ for county in counties[:10]:
 
 
     if feature_engineering==True:
-
-
         #################################################### feature engineering for FEWS ####################################################
-        features['FEWS_CS_lag1']=features['FEWS_CS'].shift(1)
+        #create a forward-filled column for FEWS_CS
+        features['FEWS_CS_FF']=features['FEWS_CS'].fillna(method='ffill')
+        
+        # create a baseline ini 
+        base_ini=features['FEWS_CS_FF']
+        # FEWS_CS lags, and fill nan values with mean of the column
+        features['FEWS_CS_lag1']=features['FEWS_CS_FF'].shift(1)
         features['FEWS_CS_lag1'].fillna((features['FEWS_CS_lag1'].mean()), inplace=True)
 
+        features['FEWS_CS_lag2']=features['FEWS_CS_FF'].shift(2)
+        features['FEWS_CS_lag2'].fillna((features['FEWS_CS_lag2'].mean()), inplace=True)
 
-        # FEWS_CS lags
-
-        features['FEWS_CS_lag2']=features['FEWS_CS'].shift(2)
-        features['FEWS_CS_lag3']=features['FEWS_CS'].shift(3)
-        features['FEWS_CS_lag4']=features['FEWS_CS'].shift(4)
-        features['FEWS_CS_lag5']=features['FEWS_CS'].shift(5)
-        features['FEWS_CS_lag6']=features['FEWS_CS'].shift(6)
+        features['FEWS_CS_lag3']=features['FEWS_CS_FF'].shift(3)
+        features['FEWS_CS_lag3'].fillna((features['FEWS_CS_lag3'].mean()), inplace=True)
+        
+        features['FEWS_CS_lag4']=features['FEWS_CS_FF'].shift(4) # CHECK: FILL NANS WITH MEAN IS INCORRECT? --> FILL MEANS WITH JUST THE FEWS OBS COLUMN! 
+        features['FEWS_CS_lag4'].fillna((features['FEWS_CS_lag4'].mean()), inplace=True)    
 
         # create new variables from rolling mean of existing features, where the preceding 4 months are used to calculate the mean. Do not include the current month 
-        features['FEWS_CS_roll_mean']=features['FEWS_CS'].rolling(window=4).mean().shift(1)
-
-        # fill nan values which are created by the rolling mean in the first 4 months with the mean of the whole column
+        features['FEWS_CS_roll_mean']=features['FEWS_CS_FF'].rolling(window=4).mean().shift(1)
         features['FEWS_CS_roll_mean'].fillna((features['FEWS_CS_roll_mean'].mean()), inplace=True)
-        # same for the lags 
         
-        features['FEWS_CS_lag2'].fillna((features['FEWS_CS_lag2'].mean()), inplace=True)
-        features['FEWS_CS_lag3'].fillna((features['FEWS_CS_lag3'].mean()), inplace=True)
-        features['FEWS_CS_lag4'].fillna((features['FEWS_CS_lag4'].mean()), inplace=True)
-        features['FEWS_CS_lag5'].fillna((features['FEWS_CS_lag5'].mean()), inplace=True)    
-        features['FEWS_CS_lag6'].fillna((features['FEWS_CS_lag6'].mean()), inplace=True)
-        
-
 
     # One-hot encode the data using pandas get_dummies
     features = pd.get_dummies(features) 
   
-    # save labels 
-    labels=features['FEWS_CS']  
-    features['FEWS_base']=features['FEWS_CS']
 
-    # Remove the labels from the features
+
+
+
+
+    # save target 
+    labels=features['FEWS_CS'].dropna() # drop nan values in labels
+
+    # Remove the target from the features
     features= features.drop('FEWS_CS', axis = 1)# axis 1 refers to the columns
+    features=features.drop('FEWS_CS_FF', axis=1)
 
 
     
@@ -374,39 +370,40 @@ for county in counties[:10]:
     feature_list = list(features.columns)
 
     if forecast==True: 
-        # implement leads of 1,4 and 8, 12 months for all features except for the FEWS_base
-        # shift the features by 1,4 and 8 months, but not for the FEWS_base column
-        # list of features except for FEWS_base
+        # implement leads of 1,4 and 8, 12 months for all features, by shifting features X rows down based on lead 
         
         for lead in leads: 
+
             features_l= features.copy()
             
             #cols_shift=list(features_l.columns)
             #cols_shift.remove('FEWS_base')
             
-            # shift the FEWS_base column of the features dataframe by the lead (1,4,8,12) months. This moves the fews base from the future to the past to test the model in predicting the future
-            features_l['FEWS_base']=features_l['FEWS_base'].shift(-lead)
+            # Shift features by the lead (1,4,8,12) months. This trains and tests the model with features from the past, creating a lag to predict the future.
+            features_l=features_l.shift(lead)
             
             #remove the last X rows based on the lead
             if lead!=0:
-                features_l=features_l.drop(features_l.index[-lead:])
-    
+                features_l=features_l.drop(features_l.index[:lead])
+
+            # after shifting, keep only the rows with index values that are in the labels dataframe
+            features_l=features_l.loc[labels.index]
             
 
             
 
             #################################################### split data into training and testing sets ####################################################
-            train_features, test_features, train_labels, test_labels = train_test_split(features_l, features_l['FEWS_base'], test_size = 0.25,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
+            train_features, test_features, train_labels, test_labels = train_test_split(features_l, labels, test_size = 0.25,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
             feature_list2=feature_list.copy()
 
 
             ############ create original fews_base values in shape of train_features and test_features ############# 
-            fews_base_original=features['FEWS_base']
+            # fews_base_original=features['FEWS_base']
 
             
-            # original fews_base of the months present in train/test features 
-            fews_base_original_train=fews_base_original.iloc[:len(train_features)] 
-            fews_base_original_test=fews_base_original.iloc[-len(test_features):]
+            # # original fews_base of the months present in train/test features 
+            # fews_base_original_train=fews_base_original.iloc[:len(train_features)] 
+            # fews_base_original_test=fews_base_original.iloc[-len(test_features):]
 
             ############ create dates for training and testing set #############
             train_dates=pd.DataFrame({'day':train_features.index.day, 'month':train_features.index.month, 'year':train_features.index.year})
@@ -417,10 +414,10 @@ for county in counties[:10]:
             test_features_np = np.array(test_features)
             train_labels_np = np.array(train_labels)
             test_labels_np = np.array(test_labels)
-            fews_base_original_np=np.array(fews_base_original)
+            #fews_base_original_np=np.array(fews_base_original)
             # fews_base_original_l_np=np.array(fews_base_original_l) ### CHECK: NOT USED
-            fews_base_original_train_np=np.array(fews_base_original_train) ### CHECK: NOT USED
-            fews_base_original_test_np=np.array(fews_base_original_test)
+            #fews_base_original_train_np=np.array(fews_base_original_train) ### CHECK: NOT USED
+            #fews_base_original_test_np=np.array(fews_base_original_test)
             train_dates_np=np.array(train_dates) #real original time stamps 
             test_dates_np=np.array(test_dates) #real original time stamps 
 
@@ -472,18 +469,18 @@ for county in counties[:10]:
 
             ######################## baseline 1: make a prediction X months ahead, based on the FEWS_base value of the current time step ########################
             # take the original FEWS values, shift X months forward in time and use this as the prediction
-            base1_preds=fews_base_original.shift(lead)
+            base_ini.dropna(inplace=True) # base_ini created in line 284
+            base1_preds=base_ini.shift(lead) 
 
             # remove the first X rows based on the lead. Prediction for these months is not existing since they are outside the time series
             if lead!=0:
                 base1_preds=base1_preds.drop(base1_preds.index[:lead])
             
-            # keep only the predictions for the test set months 
-            base1_preds=base1_preds.iloc[-len(test_labels):]
-            
-            
+            # keep only the base1_preds index if the index is in the test_labels index. 
+            base1_preds=base1_preds[base1_preds.index.isin(test_labels.index)]
+
             # Baseline errors, and display average baseline error
-            base1_errors = abs(base1_preds - fews_base_original_test)
+            base1_errors = abs(base1_preds - test_labels)
 
             # plt.plot(base1_preds, label='Predictions')
             # plt.plot(base1_truth, label='Truth')
@@ -492,31 +489,41 @@ for county in counties[:10]:
             # plt.show()
 
             ####################### baseline 2: create prediction in test dataset based on observed seasonality in the training dataset  #######################
-            # dataframe with original fews values, for the training period --> use this to calculate the seasonality
-            seasonality=fews_base_original_train.groupby(fews_base_original_train.index.month).mean()
-            # Assign these monthly values (from seasonality) to the months as specified in the datetime index of the fews_base_original_test dataframe
-            seasonality=seasonality.reindex(fews_base_original_test.index.month)
+            # take training values of fews, for index with years < 2016. Calculate seasonality based on that (after 2015 there is a change in the months included in the fews datset)
+            train_set_seasonality=train_labels.loc[train_labels.index.year<2016]
+            seasonality=train_set_seasonality.groupby(train_set_seasonality.index.month).mean()
+            
+            # reindex the seasonality dataframe to the months of the year
+            seasonality=seasonality.reindex([1,2,3,4,5,6,7,8,9,10,11,12,1])
+
+            # interpolate the values using interpolation 
+            seasonality=seasonality.interpolate(method='linear', axis=0)
+            # make seasonality one row shorter (remove the last row!)
+            seasonality=seasonality.iloc[:-1]
+
+            # Assign these monthly values (from seasonality) to the test set, based on the month of the index
+            seasonality=seasonality.reindex(test_labels.index.month)
+
             # reset the index of the seasonality dataframe  
             seasonality=seasonality.reset_index(drop=True)
             # set the index of the seasonality dataframe to the index of the fews_base_original_test dataframe
-            seasonality.index=fews_base_original_test.index
+            seasonality.index=test_labels.index
             
             base2_preds= seasonality.copy()
+
+
+
             
             # baseline errors, and display average baseline error
-            base2_errors = abs(base2_preds - fews_base_original_test)
+            base2_errors = abs(base2_preds - test_labels)
 
 
             plt.plot(base2_preds, label='Seasonality')
-            plt.plot(fews_base_original_test, label='FEWS_base')
+            plt.plot(test_labels, label='FEWS_base')
             plt.legend()
             plt.show()
 
         
-            ############################################### Drop fews base vars from datasets ###############################################
-            train_features_np = np.delete(train_features_np, feature_list2.index('FEWS_base'), axis=1)
-            test_features_np = np.delete(test_features_np, feature_list2.index('FEWS_base'), axis=1)
-            feature_list2.remove('FEWS_base')
 
             ############################################### Linear Regression ###############################################
 
@@ -568,26 +575,26 @@ for county in counties[:10]:
 
             # Explained variance score: 1 is perfect prediction
             var_score = r2_score(test_labels, predictions)
-            var_score_baseline= r2_score(fews_base_original_test, base1_preds)
-            var_score_baseline2= r2_score(fews_base_original_test, base2_preds)
+            var_score_baseline= r2_score(test_labels, base1_preds)
+            var_score_baseline2= r2_score(test_labels, base2_preds)
             var_score_lr= r2_score(test_labels, lr_preds)
 
             ############################# mean absolute error #############################
             mae = mean_absolute_error(test_labels, predictions)
-            mae_baseline= mean_absolute_error(fews_base_original_test, base1_preds)
-            mae_baseline2= mean_absolute_error(fews_base_original_test, base2_preds)
+            mae_baseline= mean_absolute_error(test_labels, base1_preds)
+            mae_baseline2= mean_absolute_error(test_labels, base2_preds)
             mae_lr= mean_absolute_error(test_labels, lr_preds)
 
             ############################# mean squared error #############################
             mse = mean_squared_error(test_labels, predictions)
-            mse_baseline= mean_squared_error(fews_base_original_test, base1_preds)
-            mse_baseline2= mean_squared_error(fews_base_original_test, base2_preds)
+            mse_baseline= mean_squared_error(test_labels, base1_preds)
+            mse_baseline2= mean_squared_error(test_labels, base2_preds)
             mse_lr= mean_squared_error(test_labels, lr_preds)
 
             ############################# root mean squared error ############################# 
             rmse = np.sqrt(mean_squared_error(test_labels, predictions))
-            rmse_baseline= np.sqrt(mean_squared_error(fews_base_original_test, base2_preds))
-            rmse_baseline2= np.sqrt(mean_squared_error(fews_base_original_test, base2_preds))
+            rmse_baseline= np.sqrt(mean_squared_error(test_labels, base2_preds))
+            rmse_baseline2= np.sqrt(mean_squared_error(test_labels, base2_preds))
             rmse_lr= np.sqrt(mean_squared_error(test_labels, lr_preds))
 
 
@@ -649,43 +656,21 @@ for county in counties[:10]:
             plt.show()
             plt.close()
 
-            ################# reconstruct dataframe with predictions. Datestamps retrieved are "real" original datestampes from features df #################
-            months = test_dates_np[:, 1]
-            days = test_dates_np[:, 0]
-            years = test_dates_np[:, 2]# Column of dates
-            test_dates = [str(int(year)) + '-' + str(int(month)) + '-' + str(int(day)) for year, month, day in zip(years, months, days)]# Convert to datetime objects
-            test_dates = [datetime.datetime.strptime(date, '%Y-%m-%d') for date in test_dates]
-            
-            predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions,'lr':lr_preds}) # Dataframe with predictions and dates
+            ################# reconstruct dataframe with predictions. Datestamps retrieved are "real" original datestampes from features df #################           
+            predictions_data = pd.DataFrame(data = {'date': test_labels.index, 'prediction': predictions,'lr':lr_preds}) # Dataframe with predictions and dates
 
             ################# Plot predictions #################
-            
-            ####### observations (target+ 2 most important features)
+            #load target obs 
+            target_obs=labels.copy()
+            #load feature obs
             #extract names from 2 most important features from feature importance tuples 
             feature1, feature2=feature_importances[0][0], feature_importances[1][0]
-            obs=features[['FEWS_base',feature1,feature2]]
-
-
-            ################# Convert predictions (rf+lr) to original time series (shift X rows forward based on lead time) #################
-            # shift predictions forward based on lead time, and extend the date column by the same amount to match the length of the predictions. In this way, the predictions in the last rows of the dataframe are not lost. 
-            # append rows to the end of the dataframe with Nan values, but with the date shifted forward by the lead time.
-            # This way, the predictions are shifted forward by the lead time, and the date column is extended by the same amount.
-            # The predictions in the last rows of the dataframe are not lost, because they are shifted forward by the lead time, and the date column is extended by the same amount.
-
-            # create dataframe with length = lead 
-            test = pd.DataFrame(np.nan, index=np.arange(lead), columns=predictions_data.columns)
-            # insert dates in the date column starting from the last date in the original dataframe, and incrementing by 1 month for each row
-            test['date']=pd.date_range(predictions_data['date'].iloc[-1]+relativedelta(months=1), periods=lead, freq='MS')
-            # append the test dataframe to the original dataframe
-            predictions_data=pd.concat([predictions_data, test], axis=0)
-
-            # shift predictions of the LR/RF model forward (from initiation time to forecast time)
-            predictions_data['prediction']=predictions_data['prediction'].shift(lead)
-            predictions_data['lr']=predictions_data['lr'].shift(lead)
-
+            feature_obs=features[[feature1,feature2]]
+            feature_obs=feature_obs.loc[feature_obs.index>=target_obs.index[0]]
+            
             fig, ax = plt.subplots(figsize=(10, 5))
             # Plot the actual values
-            plt.plot(obs.index, obs['FEWS_base'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
+            plt.plot(target_obs.index, target_obs, 'b-', label = 'Observed FEWS class')# Plot the predicted values
             
             # plot base predictions
             plt.plot(base1_preds.index, base1_preds, 'go', label = 'base1 prediction (future based on last observed value)')
@@ -711,15 +696,15 @@ for county in counties[:10]:
             ax2=ax.twinx()
             
             # Plot the actual values
-            ax.plot(obs.index, obs['FEWS_base'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
+            ax.plot(target_obs.index, target_obs, 'b-', label = 'Observed FEWS class')# Plot the predicted values
             # plot rf predictions
             ax.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'random Forest prediction')
             
             # plot base predictions
 
             # plot features
-            ax2.plot(obs.index, obs[feature1], 'o-', color='orange', label = feature1)# Plot the predicted values
-            ax2.plot(obs.index, obs[feature2], 'o-', color='black', label = feature2)# Plot the predicted values
+            ax2.plot(feature_obs.index, feature_obs[feature1], 'o-', color='orange', label = feature1)# Plot the predicted values
+            ax2.plot(feature_obs.index, feature_obs[feature2], 'o-', color='black', label = feature2)# Plot the predicted values
             
             plt.xticks(rotation = '60'); 
             plt.xlabel('Date'); plt.ylabel('most important features'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(county,lead,round(accuracy, 2)));
@@ -855,6 +840,7 @@ for lead in leads:
 
 
 # plot var_vars for all leads averaged over all counties 
+
 # melt the df to get a df with lead, variable and var_score
 stats_df_melt=pd.melt(stats_df, id_vars=['lead'], value_vars=var_vars, var_name='variable', value_name='var_score')
 # plot the df with seaborn, lead on x-axis
@@ -862,12 +848,61 @@ fig=plt.figure(figsize=(10, 5))
 sns.barplot(x='lead', y='var_score', hue='variable', data=stats_df_melt)
 plt.title('Variance explained')
 plt.xticks(rotation=90)
-plt.ylim(0, stats_df_melt['var_score'].max())
+plt.ylim(0, stats_df['var_score'].max())
 plt.tight_layout()
 # save plot in plots folder
 plt.savefig(RESULT_FOLDER+'\\plots\\R2_all_leads.png', dpi=300, bbox_inches='tight')
 plt.show()
 plt.close()
+
+# plot mse_vars for all leads averaged over all counties
+
+# melt the df to get a df with lead, variable and var_score
+stats_df_melt=pd.melt(stats_df, id_vars=['lead'], value_vars=mae_vars, var_name='variable', value_name='mae_score')
+# plot the df with seaborn, lead on x-axis
+fig=plt.figure(figsize=(10, 5))
+sns.barplot(x='lead', y='mae_score', hue='variable', data=stats_df_melt)
+plt.title('MAE')
+plt.xticks(rotation=90)
+plt.ylim(0,1)
+plt.tight_layout()
+# save plot in plots folder
+plt.savefig(RESULT_FOLDER+'\\plots\\MAE_all_leads.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
+
+
+
+# loop over the leads
+for i,lead in enumerate(leads): 
+    # get lead 2 var scores
+    stats_df_lead2=stats_df.loc[stats_df['lead']==lead][['var_score','county']]
+
+    # load shapefile with county boundaries in Kenya using geopandas
+    county_sf=gpd.read_file('C:/Users/tbr910/Documents/Forecast_action_analysis/vector_data/geo_boundaries/Kenya/County.shp')
+    county_sf=county_sf.set_index('OBJECTID')
+    county_sf.rename(columns={'COUNTY':'county'}, inplace=True)  
+
+    # add the geometries to the stats_df_lead2 df based on the county name
+    gdf_scores=pd.merge(stats_df_lead2, county_sf, on='county')[['county', 'var_score', 'geometry']]
+
+    # convert to geodataframe
+    gdf_scores=gpd.GeoDataFrame(gdf_scores, geometry='geometry')
+    gdf_scores=gdf_scores.set_crs(epsg=4326)
+
+    # plot the geodataframe, with a fixed colorbar
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+    gdf_scores.plot(column='var_score', ax=ax, legend=True, vmin=0,vmax=0.5, cmap='OrRd')
+    ax.set_title('Variance explained for lead %s'%(lead))
+    ax.set_axis_off()
+    plt.tight_layout()
+    plt.show()
+    # save plot in plots folder
+
+
+
+
+
 
 
 
