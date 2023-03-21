@@ -89,8 +89,8 @@ os.chdir(ML_FOLDER)
 #%% define master variables 
 feature_engineering=True #without feature engineering the errors are much higher (almost 2x)   
 forecast=True
-fill_nans_target=True
-leads=[0,1,2,4,8,12] # check: 12 lead creates quite some nan's in the training data 
+fill_nans_target=False
+leads=[0,1,2,4,8,12] # check:  12 lead creates quite some nan's in the training data 
 random_split=False
 #%% Define counties & read data
 counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
@@ -123,6 +123,7 @@ food_prices=food_prices[['county','item_name','item_price_flag','value_usd']]
 food_prices=food_prices[((food_prices['item_price_flag']=='actual') | (food_prices['item_price_flag']=='aggregate')) & (food_prices['item_name'].str.contains('Maize'))]
 #food_prices=food_prices[(food_prices['item_price_flag']=='actual') & (food_prices['item_name'].str.contains('Maize'))]
 
+
 # rename value_usd to maize_price and drop item_name and item_price_flag
 food_prices.rename(columns={'value_usd':'maize_price'}, inplace=True)
 food_prices.drop(['item_name','item_price_flag'], axis=1, inplace=True)
@@ -147,7 +148,7 @@ feature_names=pd.DataFrame(df.columns, columns=['feature'])
 
 #%% loop over counties  
 
-for county in counties[0:10]: 
+for county in counties[:10]: 
     print (county)
     features= df[df['county']==county]#['FEWS_CS']#[~df['FEWS_CS'].isnull()]
 
@@ -417,11 +418,11 @@ for county in counties[0:10]:
             train_labels_np = np.array(train_labels)
             test_labels_np = np.array(test_labels)
             fews_base_original_np=np.array(fews_base_original)
-            fews_base_original_l_np=np.array(fews_base_original_l) ### CHECK: NOT USED
+            # fews_base_original_l_np=np.array(fews_base_original_l) ### CHECK: NOT USED
             fews_base_original_train_np=np.array(fews_base_original_train) ### CHECK: NOT USED
             fews_base_original_test_np=np.array(fews_base_original_test)
-            train_dates_np=np.array(train_dates)
-            test_dates_np=np.array(test_dates)
+            train_dates_np=np.array(train_dates) #real original time stamps 
+            test_dates_np=np.array(test_dates) #real original time stamps 
 
 
             # Grid specs draft part
@@ -567,26 +568,26 @@ for county in counties[0:10]:
 
             # Explained variance score: 1 is perfect prediction
             var_score = r2_score(test_labels, predictions)
-            var_score_baseline= r2_score(test_labels, base1_preds)
-            var_score_baseline2= r2_score(test_labels, base2_preds)
+            var_score_baseline= r2_score(fews_base_original_test, base1_preds)
+            var_score_baseline2= r2_score(fews_base_original_test, base2_preds)
             var_score_lr= r2_score(test_labels, lr_preds)
 
             ############################# mean absolute error #############################
             mae = mean_absolute_error(test_labels, predictions)
-            mae_baseline= mean_absolute_error(test_labels, base1_preds)
-            mae_baseline2= mean_absolute_error(test_labels, base2_preds)
+            mae_baseline= mean_absolute_error(fews_base_original_test, base1_preds)
+            mae_baseline2= mean_absolute_error(fews_base_original_test, base2_preds)
             mae_lr= mean_absolute_error(test_labels, lr_preds)
 
             ############################# mean squared error #############################
             mse = mean_squared_error(test_labels, predictions)
-            mse_baseline= mean_squared_error(test_labels, base1_preds)
-            mse_baseline2= mean_squared_error(test_labels, base2_preds)
+            mse_baseline= mean_squared_error(fews_base_original_test, base1_preds)
+            mse_baseline2= mean_squared_error(fews_base_original_test, base2_preds)
             mse_lr= mean_squared_error(test_labels, lr_preds)
 
             ############################# root mean squared error ############################# 
             rmse = np.sqrt(mean_squared_error(test_labels, predictions))
-            rmse_baseline= np.sqrt(mean_squared_error(test_labels, base2_preds))
-            rmse_baseline2= np.sqrt(mean_squared_error(test_labels, base2_preds))
+            rmse_baseline= np.sqrt(mean_squared_error(fews_base_original_test, base2_preds))
+            rmse_baseline2= np.sqrt(mean_squared_error(fews_base_original_test, base2_preds))
             rmse_lr= np.sqrt(mean_squared_error(test_labels, lr_preds))
 
 
@@ -648,14 +649,14 @@ for county in counties[0:10]:
             plt.show()
             plt.close()
 
-            ################# reconstruct dataframe with predictions #################
+            ################# reconstruct dataframe with predictions. Datestamps retrieved are "real" original datestampes from features df #################
             months = test_dates_np[:, 1]
             days = test_dates_np[:, 0]
             years = test_dates_np[:, 2]# Column of dates
             test_dates = [str(int(year)) + '-' + str(int(month)) + '-' + str(int(day)) for year, month, day in zip(years, months, days)]# Convert to datetime objects
             test_dates = [datetime.datetime.strptime(date, '%Y-%m-%d') for date in test_dates]
             
-            predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions, 'base1':base1_preds.values, 'base2': base2_preds.values,'lr':lr_preds}) # Dataframe with predictions and dates
+            predictions_data = pd.DataFrame(data = {'date': test_dates, 'prediction': predictions,'lr':lr_preds}) # Dataframe with predictions and dates
 
             ################# Plot predictions #################
             
@@ -671,13 +672,14 @@ for county in counties[0:10]:
             # This way, the predictions are shifted forward by the lead time, and the date column is extended by the same amount.
             # The predictions in the last rows of the dataframe are not lost, because they are shifted forward by the lead time, and the date column is extended by the same amount.
 
+            # create dataframe with length = lead 
             test = pd.DataFrame(np.nan, index=np.arange(lead), columns=predictions_data.columns)
             # insert dates in the date column starting from the last date in the original dataframe, and incrementing by 1 month for each row
             test['date']=pd.date_range(predictions_data['date'].iloc[-1]+relativedelta(months=1), periods=lead, freq='MS')
             # append the test dataframe to the original dataframe
             predictions_data=pd.concat([predictions_data, test], axis=0)
 
-
+            # shift predictions of the LR/RF model forward (from initiation time to forecast time)
             predictions_data['prediction']=predictions_data['prediction'].shift(lead)
             predictions_data['lr']=predictions_data['lr'].shift(lead)
 
@@ -685,11 +687,13 @@ for county in counties[0:10]:
             # Plot the actual values
             plt.plot(obs.index, obs['FEWS_base'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
             
+            # plot base predictions
+            plt.plot(base1_preds.index, base1_preds, 'go', label = 'base1 prediction (future based on last observed value)')
+            plt.plot(base2_preds.index, base2_preds, 'yo', label = 'base2 prediction (future based on train data seasonality)')
+            
             # plot rf predictions
             plt.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'Random Forest prediction')
-            # plot base predictions
-            plt.plot(predictions_data['date'], predictions_data['base1'], 'go', label = 'base1 prediction (current = future)')
-            plt.plot(predictions_data['date'], predictions_data['base2'], 'yo', label = 'baseline prediction (past seasonality= future)')
+
             #plot lr predictions
             plt.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
             plt.xticks(rotation = '60'); 
