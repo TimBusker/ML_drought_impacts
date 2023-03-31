@@ -25,7 +25,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit,RandomizedSearchCV
 
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, explained_variance_score
 from sklearn.utils import shuffle
@@ -81,9 +81,12 @@ shap.initjs() # load JS visualization code to notebook
 
 #%% Define paths 
 DATA_FOLDER = 'C:\\Users\\tbr910\\Documents\\Forecast_action_analysis\\'
+PLOT_FOLDER= 'C:\\Users\\tbr910\\Documents\\ML\\ML_results\\plots'
 ML_FOLDER = 'C:\\Users\\tbr910\\Documents\\ML\\'
 SE_FOLDER= 'C:\\Users\\tbr910\\Documents\\ML\\SE_data\\'
+SST_FOLDER = 'C:\\Users\\tbr910\\Documents\\ML\\SE_data\\climate_vars'
 RESULT_FOLDER = 'C:\\Users\\tbr910\\Documents\\ML\\ML_results'
+TREE_FOLDER= 'C:\\Users\\tbr910\\Documents\\ML\\trees'
 
 os.chdir(ML_FOLDER)
 #%% define master variables 
@@ -92,19 +95,25 @@ forecast=True
 fill_nans_target=False
 leads=[0,1,2,4,8,12] # check:  12 lead creates quite some nan's in the training data 
 random_split=False
+hp_tuning=False
+with_NDMA=True
+with_TC=True
+clustering_all=True
 #%% Define counties & read data
 counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
-df=pd.read_excel('input_data.xlsx', index_col=0)
+
+
+    
+df=pd.read_excel('input_data.xlsx', index_col=0) # This df is until 2021-12, update with 2022 data! 
 df.drop('GP',axis=1, inplace=True)
+
+features_stack=pd.DataFrame()
+labels_stack=pd.DataFrame()
 
 stats_df=pd.DataFrame(columns=('county', 'accuracy', 'accuracy_baseline', 'accuracy_baseline2','accuracy_lr', 'var_score','var_score_baseline','var_score_baseline2','var_score_lr', 'mae', 'mae_baseline', 'mae_baseline2','mae_lr', 'mse', 'mse_baseline', 'mse_baseline2', 'mse_lr', 'lead'))
 features_df=pd.DataFrame(columns=('county', 'feature', 'feature_imp', 'lead'))             
 features_df_full=pd.DataFrame()
-
-#%% check of data is stationary? https://www.analyticsvidhya.com/blog/2021/06/baseline2-forest-for-time-series-forecasting/
-result = adfuller(df.FEWS_CS.dropna())
-#print('p-value: %f' % result[1])# <0.05 is ok
-
+best_params_df=pd.DataFrame()
 
 ############################################# get extra socio economic data #############################################
 
@@ -133,7 +142,29 @@ food_prices.index=pd.to_datetime(food_prices.index)
 food_prices.index=food_prices.index.to_period('M').to_timestamp('D', 'start')
 
 
+############################################# SST INDEX #############################################
 
+########################## load SST index data ##########################
+if with_TC==True: 
+    # WVG processed sheet
+    WVG=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='WVG_processed', index_col=0, header=0)
+
+    # shift WVG one row forward 
+    WVG=WVG.shift(1)
+    # For WVG, ffill the missing values 
+    WVG.fillna(method='ffill', inplace=True)
+    # MEI sheet 
+    MEI=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='MEI', index_col=0, header=0)
+    # remove rows with values <-10
+    MEI=MEI[MEI['MEI']>-10]
+    # NINA34 sheet
+    NINA34=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='NINA34', index_col=0, header=0)
+    # remove rows with values <-10
+    NINA34=NINA34[NINA34['NINA34']>-10]
+    # IOD sheet
+    IOD=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='IOD', index_col=0, header=0)
+    # convert index to datetime
+    IOD.index=pd.to_datetime(IOD.index)
 
 ######################  population ###################### https://data.humdata.org/dataset/kenya-population-statistics-2019
 
@@ -147,14 +178,328 @@ feature_names=pd.DataFrame(df.columns, columns=['feature'])
 
 
 
+######################################### Hyper parameters tuning #########################################
 
-#%% loop over counties  
+if hp_tuning==True: 
+    for i,county in enumerate(counties): 
+        print (county)
+        print(i)
+        features= df[df['county']==county]#['FEWS_CS']#[~df['FEWS_CS'].isnull()]
+        
+        #Fill na for indicators (debatable!)
+        NDMA_indicators=['MPR', 'CP', 'MP', 'HDW', 'LDW', 'MUAC'] #'GP'
+        if with_NDMA==False: 
+            features.drop(NDMA_indicators, axis=1, inplace=True)
 
-for county in counties: 
+
+        ########################## merge SST data with features df ##########################
+        if with_TC==True: 
+            features=features.merge(WVG, how='left', left_index=True, right_index=True)# merge WVG to features df
+            features=features.merge(MEI, how='left', left_index=True, right_index=True)# merge MEI to features df
+            features=features.merge(NINA34, how='left', left_index=True, right_index=True)# merge NINA34 to features df
+            features=features.merge(IOD, how='left', left_index=True, right_index=True)# merge IOD to features df
+
+
+        ############################################# Merge food prices #############################################
+        
+
+        # merge food prices for a county with the features dataframe
+        food_prices_county=food_prices[food_prices['county']==county]
+        # sort index 
+        food_prices_county.sort_index(inplace=True)
+        # mean values for same datetime index 
+        food_prices_county=food_prices_county.groupby(food_prices_county.index).mean()
+        # print list of missing months in the index
+        #print(food_prices_county.index[~food_prices_county.index.isin(features.index)])
+        
+        # add food prices to features as a new column, for the same datetime index. Keep all rows in features, even if there is no food price data for that month
+        features=features.merge(food_prices_county, how='left', left_index=True, right_index=True)
+
+
+
+
+        ############################################# NAN values processing #############################################
+
+        
+        # linear imputation FEWS in between the not nan values 
+        #
+        
+        if fill_nans_target==True:
+            #features['FEWS_CS']=features['FEWS_CS'].interpolate(method='time',limit_area='inside')
+            features['FEWS_CS']=features['FEWS_CS'].fillna(method="ffill")
+        
+        
+        # create dataframe column called 'FEWS_CS_baseline2' with baseline2 float numbers (based on min and max of FEWS_CS)
+        #features['FEWS_CS_baseline2']= np.baseline2.uniform(features['FEWS_CS'].min(), features['FEWS_CS'].max(), size=len(features))
+        
+
+
+
+        #make new SE_indicators variable based on whether there is SE data for the county or not
+        if food_prices_county.empty:
+            SE_indicators= []
+        else:
+            SE_indicators= ['maize_price']
+        
+        all_SE_indicators=NDMA_indicators+SE_indicators
+
+        if with_NDMA==False: 
+            all_SE_indicators=SE_indicators.copy()
+
+        for ind in all_SE_indicators:
+            features[ind].fillna((features[ind].mean()), inplace=True) # CHECK
+
+
+
+
+        #################################################### feature engineering ####################################################
+    
+
+        if feature_engineering==True:
+            # add rolling mean for 4 months and 12 months
+            #     
+            features['NDVI_roll_mean']=features['NDVI'].rolling(window=4).mean().shift(1)
+            features['NDVI_range_roll_mean']=features['NDVI_range'].rolling(window=4).mean().shift(1)
+            features['NDVI_crop_roll_mean']=features['NDVI_crop'].rolling(window=4).mean().shift(1)
+            features['wd_roll_mean']=features['wd'].rolling(window=4).mean().shift(1)
+            features['ds_roll_mean']=features['ds'].rolling(window=4).mean().shift(1)
+            features['maize_price_roll_mean']=features['maize_price'].rolling(window=4).mean().shift(1)
+
+            features['NDVI_roll_mean_12']=features['NDVI'].rolling(window=12).mean().shift(1)
+            features['NDVI_range_roll_mean_12']=features['NDVI_range'].rolling(window=12).mean().shift(1)
+            features['NDVI_crop_roll_mean_12']=features['NDVI_crop'].rolling(window=12).mean().shift(1)
+            features['wd_roll_mean_12']=features['wd'].rolling(window=12).mean().shift(1)
+            features['ds_roll_mean_12']=features['ds'].rolling(window=12).mean().shift(1)
+            
+            # fill nan values that came out of rolling
+            features['NDVI_roll_mean'].fillna((features['NDVI_roll_mean'].mean()), inplace=True) # check: fillna with mean is incorrect! 
+            features['NDVI_range_roll_mean'].fillna((features['NDVI_range_roll_mean'].mean()), inplace=True)
+            features['NDVI_crop_roll_mean'].fillna((features['NDVI_crop_roll_mean'].mean()), inplace=True)
+            features['wd_roll_mean'].fillna((features['wd_roll_mean'].mean()), inplace=True)
+            features['ds_roll_mean'].fillna((features['ds_roll_mean'].mean()), inplace=True)
+
+            features['NDVI_roll_mean_12'].fillna((features['NDVI_roll_mean_12'].mean()), inplace=True)
+            features['NDVI_range_roll_mean_12'].fillna((features['NDVI_range_roll_mean_12'].mean()), inplace=True)
+            features['NDVI_crop_roll_mean_12'].fillna((features['NDVI_crop_roll_mean_12'].mean()), inplace=True)
+            features['wd_roll_mean_12'].fillna((features['wd_roll_mean_12'].mean()), inplace=True)
+            features['ds_roll_mean_12'].fillna((features['ds_roll_mean_12'].mean()), inplace=True)
+
+
+
+            ######################### rolling operations for maize prices ######################### CHECK: NO ROLLING FOR NDMA IND? 
+            # maize prices 
+            if food_prices_county.empty:
+                pass
+            else:
+                features['maize_price_roll_mean_12']=features['maize_price'].rolling(window=12).mean().shift(1)
+                
+                # fill nan values that came out of rolling for maize price
+                features['maize_price_roll_mean'].fillna((features['maize_price_roll_mean'].mean()), inplace=True)# check: incorrect nan filling. Fill with obs 
+                features['maize_price_roll_mean_12'].fillna((features['maize_price_roll_mean_12'].mean()), inplace=True)
+
+            # rolling operations for SST indicators (WVG, IOD, MEI, NINA34)
+            if with_TC==True: 
+                features['WVG_roll_mean']=features['WVG'].rolling(window=4).mean().shift(1)
+                features['IOD_roll_mean']=features['IOD'].rolling(window=4).mean().shift(1)
+                features['MEI_roll_mean']=features['MEI'].rolling(window=4).mean().shift(1)
+                features['NINA34_roll_mean']=features['NINA34'].rolling(window=4).mean().shift(1)
+
+                features['WVG_roll_mean_12']=features['WVG'].rolling(window=12).mean().shift(1)
+                features['IOD_roll_mean_12']=features['IOD'].rolling(window=12).mean().shift(1)
+                features['MEI_roll_mean_12']=features['MEI'].rolling(window=12).mean().shift(1)
+                features['NINA34_roll_mean_12']=features['NINA34'].rolling(window=12).mean().shift(1)
+
+                # fill nan values that came out of rolling
+                features['WVG_roll_mean'].fillna((features['WVG_roll_mean'].mean()), inplace=True)
+                features['IOD_roll_mean'].fillna((features['IOD_roll_mean'].mean()), inplace=True)
+                features['MEI_roll_mean'].fillna((features['MEI_roll_mean'].mean()), inplace=True)
+                features['NINA34_roll_mean'].fillna((features['NINA34_roll_mean'].mean()), inplace=True)
+
+                features['WVG_roll_mean_12'].fillna((features['WVG_roll_mean_12'].mean()), inplace=True)
+                features['IOD_roll_mean_12'].fillna((features['IOD_roll_mean_12'].mean()), inplace=True)
+                features['MEI_roll_mean_12'].fillna((features['MEI_roll_mean_12'].mean()), inplace=True)
+                features['NINA34_roll_mean_12'].fillna((features['NINA34_roll_mean_12'].mean()), inplace=True)
+
+
+
+        # drop nan values when whole column is nan (CROP column)
+        features.dropna(axis=1, how='all', inplace=True)
+
+
+
+        #################################################### Extract MAM and OND seasons ####################################################
+        features['month']=features.index.month
+        features['day']=features.index.day
+        features['year']=features.index.year
+
+        # add OND and MAM rainy season
+        # OND --> months 10,11,12, flag in a new column with boolean values
+        features['OND']=((features['month']==10) | (features['month']==11) | (features['month']==12))
+        # MAM --> months 3,4,5, flag in a new column with boolean values
+        features['MAM']=((features['month']==3) | (features['month']==4) | (features['month']==5))
+
+        # make a seperate dataframe with day, month, year columns 
+        features_date=features[['day','month','year']]
+
+        # drop day, month, year columns from features
+        features.drop(['day','month','year'], axis=1, inplace=True)
+
+
+        if feature_engineering==True:
+            #################################################### feature engineering for FEWS ####################################################
+            #create a forward-filled column for FEWS_CS
+            features['FEWS_CS_FF']=features['FEWS_CS'].fillna(method='ffill')
+            
+            # create a baseline ini 
+            base_ini=features['FEWS_CS_FF']
+            # FEWS_CS lags, and fill nan values with mean of the column
+            features['FEWS_CS_lag1']=features['FEWS_CS_FF'].shift(1)
+            features['FEWS_CS_lag1'].fillna((features['FEWS_CS_lag1'].mean()), inplace=True)
+
+            features['FEWS_CS_lag2']=features['FEWS_CS_FF'].shift(2)
+            features['FEWS_CS_lag2'].fillna((features['FEWS_CS_lag2'].mean()), inplace=True)
+
+            features['FEWS_CS_lag3']=features['FEWS_CS_FF'].shift(3)
+            features['FEWS_CS_lag3'].fillna((features['FEWS_CS_lag3'].mean()), inplace=True)
+            
+            features['FEWS_CS_lag4']=features['FEWS_CS_FF'].shift(4) # CHECK: FILL NANS WITH MEAN IS INCORRECT? --> FILL MEANS WITH JUST THE FEWS OBS COLUMN! 
+            features['FEWS_CS_lag4'].fillna((features['FEWS_CS_lag4'].mean()), inplace=True)    
+
+            # create new variables from rolling mean of existing features, where the preceding 4 months are used to calculate the mean. Do not include the current month 
+            features['FEWS_CS_roll_mean']=features['FEWS_CS_FF'].rolling(window=4).mean().shift(1)
+            features['FEWS_CS_roll_mean'].fillna((features['FEWS_CS_roll_mean'].mean()), inplace=True)
+            
+
+        # One-hot encode the data using pandas get_dummies
+        features = pd.get_dummies(features) 
+    
+
+
+
+
+
+        # save target 
+        labels=features['FEWS_CS'].dropna() # drop nan values in labels
+
+        # Remove the target from the features
+        features= features.drop('FEWS_CS', axis = 1)# axis 1 refers to the columns
+        features=features.drop('FEWS_CS_FF', axis=1)
+
+
+        ################################### saving features ###################################  
+        feature_list = list(features.columns)
+
+        if forecast==True: 
+            # implement leads of 1,4 and 8, 12 months for all features, by shifting features X rows down based on lead 
+            
+            for lead in leads: 
+
+                features_l= features.copy()
+                
+                #cols_shift=list(features_l.columns)
+                #cols_shift.remove('FEWS_base')
+                
+                # Shift features by the lead (1,4,8,12) months. This trains and tests the model with features from the past, creating a lag to predict the future.
+                features_l=features_l.shift(lead)
+                
+                #remove the last X rows based on the lead
+                if lead!=0:
+                    features_l=features_l.drop(features_l.index[:lead])
+
+                # after shifting, keep only the rows with index values that are in the labels dataframe
+                features_l=features_l.loc[labels.index]
+                
+
+                # explore the data and correlations with some fancy plots 
+
+                # pairplot with axis labels all around, and only the plots with highest correlations 
+                # sns.pairplot(features_l, kind="reg", diag_kind="kde", plot_kws={'line_kws':{'color':'red'}, 'scatter_kws': {'alpha': 0.1}})
+        
+
+                #################################################### split data into training and testing sets ####################################################
+                train_features, test_features, train_labels, test_labels = train_test_split(features_l, labels, test_size = 0.25,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
+                feature_list2=feature_list.copy()
+
+
+                #################################################### HYPER-PARAMETER TUNING ####################################################
+                counties_hp= [0,5,15,20] # selection of counties to perform hyper-parameter tuning on.
+                if i in counties_hp: 
+                    if lead==4 or lead==8:
+                        ############################################### Randomized Search CV ###############################################
+                        # Number of trees in random forest
+                        n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
+                        # Number of features to consider at every split
+                        max_features = ['auto', 'sqrt']
+                        # Maximum number of levels in tree
+                        max_depth = [int(x) for x in np.linspace(5, 110, num = 11)]
+                        max_depth.append(None)
+                        # Minimum number of samples required to split a node
+                        min_samples_split = [2, 5, 10]
+                        # Minimum number of samples required at each leaf node
+                        min_samples_leaf = [1, 2, 4]
+                        # Method of selecting samples for training each tree
+                        bootstrap = [True, False]
+                        
+                        # Create the random grid
+                        random_grid = {'n_estimators': n_estimators, #add criterion? 
+                                    'max_features': max_features, # max features to consider for each split 
+                                    'max_depth': max_depth,
+                                    'min_samples_split': min_samples_split,
+                                    'min_samples_leaf': min_samples_leaf,
+                                    'bootstrap': bootstrap}
+                        
+
+
+
+                        # Use the random grid to search for best hyperparameters
+                        # First create the base model to tune
+                        rf = RandomForestRegressor()
+                        # Random search of parameters, using 10 fold cross validation, search across 100 different combinations, and use all available cores
+                        rf_random = RandomizedSearchCV(estimator = rf, param_distributions = random_grid, n_iter = 100, cv = 10, verbose=2, random_state=42, n_jobs = -1)
+                        # Fit the random search model
+                        model2=rf_random.fit(train_features, train_labels)
+                        model2.best_params_
+
+                        # save the best parameters in a dictionary
+                        best_params= model2.best_params_
+                        # append lead to the best params dictionary
+                        best_params= {**best_params, **{'lead':lead}}
+
+                        #append the best_params dictionary to the best_params_df dataframe using pd.concat
+                        best_params_df=pd.concat([best_params_df, pd.DataFrame(best_params, index=[county])], axis=0)
+                        print(best_params_df)
+
+                        # save the best_params_df dataframe to a csv file to the ML_results folder
+                        best_params_df.to_csv(RESULT_FOLDER+'\\best_params_df.csv')
+
+
+
+
+
+
+######################################## Create labels and features ######################################
+
+for i,county in enumerate(counties): 
     print (county)
+    print(i)
+
     features= df[df['county']==county]#['FEWS_CS']#[~df['FEWS_CS'].isnull()]
 
-    ############################################# Merge extra SE data #############################################
+    # fill na for indicators (debatable!)
+    NDMA_indicators=['MPR', 'CP', 'MP', 'HDW', 'LDW', 'MUAC'] #'GP'
+    if with_NDMA==False: 
+        features.drop(NDMA_indicators, axis=1, inplace=True)
+
+
+    ########################## merge SST data with features df ##########################
+    if with_TC==True:
+        features=features.merge(WVG, how='left', left_index=True, right_index=True)# merge WVG to features df
+        features=features.merge(MEI, how='left', left_index=True, right_index=True)# merge MEI to features df
+        features=features.merge(NINA34, how='left', left_index=True, right_index=True)# merge NINA34 to features df
+        features=features.merge(IOD, how='left', left_index=True, right_index=True)# merge IOD to features df
+
+
+    ############################################# Merge food prices #############################################
     
 
     # merge food prices for a county with the features dataframe
@@ -171,6 +516,7 @@ for county in counties:
 
 
 
+
     ############################################# NAN values processing #############################################
 
     
@@ -182,12 +528,10 @@ for county in counties:
         features['FEWS_CS']=features['FEWS_CS'].fillna(method="ffill")
     
 
-    # create dataframe column called 'FEWS_CS_baseline2' with baseline2 float numbers (based on min and max of FEWS_CS)
+    # create dataframe column called 'FEWS_CS_baseline2' with baseline2 float   numbers (based on min and max of FEWS_CS)
     #features['FEWS_CS_baseline2']= np.baseline2.uniform(features['FEWS_CS'].min(), features['FEWS_CS'].max(), size=len(features))
     
 
-    # fill na for indicators (debatable!)
-    NDMA_indicators=['MPR', 'CP', 'MP', 'HDW', 'LDW', 'MUAC'] #'GP'
 
     #make new SE_indicators variable based on whether there is SE data for the county or not
     if food_prices_county.empty:
@@ -197,15 +541,13 @@ for county in counties:
 
     all_SE_indicators=NDMA_indicators+SE_indicators
 
+    if with_NDMA==False: 
+        all_SE_indicators=SE_indicators.copy()
 
     for ind in all_SE_indicators:
         features[ind].fillna((features[ind].mean()), inplace=True) # CHECK
 
-    # explore the data and correlations with some fancy plots 
 
-    # pairplot with axis labels all around, and only the plots with highest correlations 
-    # sns.pairplot(features, kind="reg", diag_kind="kde", plot_kws={'line_kws':{'color':'red'}, 'scatter_kws': {'alpha': 0.1}})
-    
 
 
     #################################################### feature engineering ####################################################
@@ -228,7 +570,7 @@ for county in counties:
         features['ds_roll_mean_12']=features['ds'].rolling(window=12).mean().shift(1)
         
         # fill nan values that came out of rolling
-        features['NDVI_roll_mean'].fillna((features['NDVI_roll_mean'].mean()), inplace=True)
+        features['NDVI_roll_mean'].fillna((features['NDVI_roll_mean'].mean()), inplace=True) # check: fillna with mean is incorrect! 
         features['NDVI_range_roll_mean'].fillna((features['NDVI_range_roll_mean'].mean()), inplace=True)
         features['NDVI_crop_roll_mean'].fillna((features['NDVI_crop_roll_mean'].mean()), inplace=True)
         features['wd_roll_mean'].fillna((features['wd_roll_mean'].mean()), inplace=True)
@@ -252,6 +594,30 @@ for county in counties:
             # fill nan values that came out of rolling for maize price
             features['maize_price_roll_mean'].fillna((features['maize_price_roll_mean'].mean()), inplace=True)# check: incorrect nan filling. Fill with obs 
             features['maize_price_roll_mean_12'].fillna((features['maize_price_roll_mean_12'].mean()), inplace=True)
+
+        # rolling operations for SST indicators (WVG, IOD, MEI, NINA34)
+        if with_TC==True: 
+            features['WVG_roll_mean']=features['WVG'].rolling(window=4).mean().shift(1)
+            features['IOD_roll_mean']=features['IOD'].rolling(window=4).mean().shift(1)
+            features['MEI_roll_mean']=features['MEI'].rolling(window=4).mean().shift(1)
+            features['NINA34_roll_mean']=features['NINA34'].rolling(window=4).mean().shift(1)
+
+            features['WVG_roll_mean_12']=features['WVG'].rolling(window=12).mean().shift(1)
+            features['IOD_roll_mean_12']=features['IOD'].rolling(window=12).mean().shift(1)
+            features['MEI_roll_mean_12']=features['MEI'].rolling(window=12).mean().shift(1)
+            features['NINA34_roll_mean_12']=features['NINA34'].rolling(window=12).mean().shift(1)
+
+            # fill nan values that came out of rolling
+            features['WVG_roll_mean'].fillna((features['WVG_roll_mean'].mean()), inplace=True)
+            features['IOD_roll_mean'].fillna((features['IOD_roll_mean'].mean()), inplace=True)
+            features['MEI_roll_mean'].fillna((features['MEI_roll_mean'].mean()), inplace=True)
+            features['NINA34_roll_mean'].fillna((features['NINA34_roll_mean'].mean()), inplace=True)
+
+            features['WVG_roll_mean_12'].fillna((features['WVG_roll_mean_12'].mean()), inplace=True)
+            features['IOD_roll_mean_12'].fillna((features['IOD_roll_mean_12'].mean()), inplace=True)
+            features['MEI_roll_mean_12'].fillna((features['MEI_roll_mean_12'].mean()), inplace=True)
+            features['NINA34_roll_mean_12'].fillna((features['NINA34_roll_mean_12'].mean()), inplace=True)
+
 
 
     # drop nan values when whole column is nan (CROP column)
@@ -308,17 +674,26 @@ for county in counties:
 
 
 
-
+    # remove the columns which contain the word 'county' and 'aridity' from features
+    features=features.loc[:, ~features.columns.str.contains('^county')]
+    features=features.loc[:, ~features.columns.str.contains('^aridity')]
 
     # save target 
-    labels=features['FEWS_CS'].dropna() # drop nan values in labels
+    labels=features['FEWS_CS']
+    labels=pd.DataFrame(labels)
+    # add county as column
+    labels['county']=county
 
     # Remove the target from the features
     features= features.drop('FEWS_CS', axis = 1)# axis 1 refers to the columns
     features=features.drop('FEWS_CS_FF', axis=1)
+    # add county as column
+    features['county']=county
+   
 
+    features_stack=pd.concat([features,features_stack], axis=0)
+    labels_stack=pd.concat([labels,labels_stack], axis=0)
 
-    
     # drop county_Garissa and aridity_arid columns
     # corr=features.drop(['county_Garissa','aridity_arid'], axis=1)
     # corr=corr.corr()
@@ -361,19 +736,37 @@ for county in counties:
     # features = featureSelect_dataframe(features, labels, mutual_info_regression, 10)
     
     
-    
+
+
+for i, county in enumerate(counties):
+    print('County: ', county)
+    # read in data
+
+    if clustering_all==False:
+        features=features_stack[features_stack['county']==county]
+        features.dropna(axis=1, how='all', inplace=True)# drop nan values when whole column is nan (CROP column)
+        labels=labels_stack[labels_stack['county']==county]
+        
+    if clustering_all==True: 
+        features=features_stack.copy()
+        labels=labels_stack.copy()
 
 
 
+        # keep only features with same index as the labels index, only if the county  is the same 
+        
 
-    ################################### saving features ###################################  
-    feature_list = list(features.columns)
+        
+
+   
+    feature_list2 = list(features.columns)
 
     if forecast==True: 
         # implement leads of 1,4 and 8, 12 months for all features, by shifting features X rows down based on lead 
         
         for lead in leads: 
 
+            #################################################### Shifting dataframe ####################################################
             features_l= features.copy()
             
             #cols_shift=list(features_l.columns)
@@ -387,14 +780,65 @@ for county in counties:
                 features_l=features_l.drop(features_l.index[:lead])
 
             # after shifting, keep only the rows with index values that are in the labels dataframe
-            features_l=features_l.loc[labels.index]
+
+
+            ############################################### Deleting NANs ###############################################
             
+            # keep only the rows in features_l which are not nan in the labels dataframe
+            labels=labels.reset_index()
+            features_l=features_l.reset_index()
+            # keep only rows in features_l which are not nan in the labels dataframe
+            features_l=features_l.iloc[labels[labels['FEWS_CS'].notnull()].index]
 
             
+            # filter features_l based on the index values of the labels dataframe
+            # features_l=features_l.loc[labels.index] # DOESNT WORK! 
+
+            # remove county column from features and labels
+            features_l.drop('county', axis=1, inplace=True)
+            labels.drop('county', axis=1, inplace=True)
+            
+            # remove nan values from labels
+            labels=labels.dropna(axis=0)
+            labels.set_index('index', inplace=True)
+            features_l.set_index('index', inplace=True)
+          
+    
+
+
+
+            ################################### Correlation analysis ###################################   
+            # correlations= features_l.drop(features_l.columns[-2:], axis=1).corr()
+
+
+
+            # mask = []
+            # for i in range(len(correlations.columns)):
+            #     mask_i = []
+            #     for j in range(len(correlations.columns)):
+            #         if i<j:
+            #             mask_i.append(True)
+            #         else: 
+            #             mask_i.append(False)
+            #     mask.append(mask_i)
+            # mask = np.array(mask)
+
+            # plt.figure(figsize=(20, 20), facecolor='w', edgecolor='k')
+            # sns.set(font_scale=1.2)
+            # sns.heatmap(correlations,cmap='coolwarm',
+            #             center = 0, 
+            #             annot=True,
+            #             fmt='.1g',
+            #             annot_kws={"fontsize":8},
+            #             mask=mask)
+            
+            # plt.title('Correlation matrix for %s months lead, county= %s'%(lead, county))
+            labels=pd.Series(labels['FEWS_CS'])
+
 
             #################################################### split data into training and testing sets ####################################################
             train_features, test_features, train_labels, test_labels = train_test_split(features_l, labels, test_size = 0.25,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
-            feature_list2=feature_list.copy()
+
 
 
             ############ create original fews_base values in shape of train_features and test_features ############# 
@@ -515,15 +959,7 @@ for county in counties:
 
             
             # baseline errors, and display average baseline error
-            base2_errors = abs(base2_preds - test_labels)
-
-
-            plt.plot(base2_preds, label='Seasonality')
-            plt.plot(test_labels, label='FEWS_base')
-            plt.legend()
-            plt.show()
-
-        
+            base2_errors = abs(base2_preds - test_labels)        
 
             ############################################### Linear Regression ###############################################
 
@@ -539,12 +975,13 @@ for county in counties:
 
             # Import the model we are using 
             # MIN SAMPLES LEAF =1 IS DANGEROUS! MAX DEPTH PRESENT OVERFITTING. MAX DEPTH=5 can still overfit (See lecture)
-            rf = RandomForestRegressor(n_estimators = 1000,max_features='auto', n_jobs=-1, max_depth=5, min_samples_leaf=1, min_samples_split=2, random_state=40) # joris also uses max features  max_features='sqrt'
+            rf = RandomForestRegressor(n_estimators = 700,max_features='sqrt', n_jobs=-1, max_depth=87, min_samples_leaf=2, min_samples_split=5, random_state=40) # joris also uses max features  max_features='sqrt'
             
+            rf.get_params()
 
             # Train the model on training data
             model=rf.fit(train_features_np, train_labels)
-            param_search = {'n_estimators' : [10, 100]}
+            
 
             #gsearch = GridSearchCV(estimator=rf, cv=tss, param_grid=param_search)
             #gsearch.fit(train_features_np, train_labels)
@@ -599,17 +1036,21 @@ for county in counties:
 
 
             
-            # Visualize trees
+            # Visualize trees --> use dtreeviz package in future? 
         
             #Pull out one tree from the forest
-            # os.chdir('C:\\Users\\tbr910\\Documents\\ML\\trees')
-            # tree = rf.estimators_[5]# Export the image to a dot file
-            # export_graphviz(tree, out_file = 'tree_%s.dot'%(county), feature_names = feature_list2, rounded = True, precision = 1)# Use dot file to create a graph
-            # (graph, ) = pydot.graph_from_dot_file('tree_%s.dot'%(county))# Write graph to a png file
-            # graph.write_png('tree_%s.png'%(county))
-            
+            os.chdir(TREE_FOLDER)
+            tree = rf.estimators_[5]# extracts 1 random tree from the forest
+            export_graphviz(tree, out_file = 'tree_L%s_%s.dot'%(lead,county), feature_names = feature_list2, rounded = True, precision = 3)# Use dot file to create a graph
+            (graph, ) = pydot.graph_from_dot_file('tree_L%s_%s.dot'%(lead,county))# Write dot file to a png file
+            graph.write_png('tree_L%s_%s.png'%(lead,county)) 
+            # remove the dot file
+            os.remove('tree_L%s_%s.dot'%(lead,county))
 
-            
+
+            ############################# feature importances #############################
+            ############# SCI-Kit Learn ################
+
             # Get feature importances -->  computed as the mean and standard deviation of accumulation of the impurity decrease within each tree.
             importances = list(rf.feature_importances_)# List of tuples with variable and importance
             std = np.std([tree.feature_importances_ for tree in rf.estimators_], axis=0)
@@ -622,18 +1063,38 @@ for county in counties:
             append['lead']=lead
             features_df_full=pd.concat([features_df_full, append], axis=0)
 
-
-
-            
             # sort feature importances and print most important feature
             feature_importances = sorted(feature_importances, key = lambda x: x[1], reverse = True)
             main_feature= feature_importances[0][0]
             feature_imp= feature_importances[0][1]
 
-            
+            ########### SHAP ################ Lundberg and Lee (2016) 
+            #Since we want the global importance, we average the absolute Shapley values per feature across the data:
+            explainer = shap.Explainer(model) # or TreeExplainer? Gives same result?
+            shap_explainer = explainer(train_features) # input what is used to fit the model 
+            shap_vals=explainer.shap_values(train_features)
+
+
             ############################################### Plotting section ###############################################
 
-                        
+            ################# Plot SHAP values #################
+            # summarize plot 
+            #shap.summary_plot(shap_values, features=features_l, feature_names=features_l.columns, plot_type='bar',title="Feature importance for %s, L%s"%(county,lead), show=False)
+            #plt.savefig(PLOT_FOLDER+'\\shap_summary_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
+            #plt.close()
+
+            # dependence plot 
+            plt.figure()
+            shap.dependence_plot('rank(1)', shap_vals, train_features) # rank(1) is the most important feature
+            plt.title('Dependence plot for %s, L%s'%(county,lead))
+            plt.savefig(PLOT_FOLDER+'\\shap_dependence_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
+
+            # beeswarm plot
+            shap.plots.beeswarm(shap_explainer, show=False)
+            plt.title('Beeswarm plot for %s, L%s'%(county,lead))
+            plt.savefig(PLOT_FOLDER+'\\shap_beeswarm_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
+            plt.close()
+
             ################# Plot feature importances #################
             # Make dir
             if not os.path.exists(RESULT_FOLDER+'\\plots'):
@@ -668,6 +1129,8 @@ for county in counties:
             feature_obs=features[[feature1,feature2]]
             feature_obs=feature_obs.loc[feature_obs.index>=target_obs.index[0]]
             
+            
+            
             fig, ax = plt.subplots(figsize=(10, 5))
             # Plot the actual values
             plt.plot(target_obs.index, target_obs, 'b-', label = 'Observed FEWS class')# Plot the predicted values
@@ -680,7 +1143,8 @@ for county in counties:
             plt.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'Random Forest prediction')
 
             #plot lr predictions
-            plt.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
+            #plt.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
+            
             plt.xticks(rotation = '60'); 
             plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('FEWS observations vs RF predictions for L=%s, county= %s. Accuracy=%s'%(lead,county,round(accuracy, 2)));
             plt.legend(loc='best')
@@ -707,12 +1171,15 @@ for county in counties:
             ax2.plot(feature_obs.index, feature_obs[feature2], 'o-', color='black', label = feature2)# Plot the predicted values
             
             plt.xticks(rotation = '60'); 
-            plt.xlabel('Date'); plt.ylabel('most important features'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(county,lead,round(accuracy, 2)));
+            plt.xlabel('Date'); plt.ylabel('feature value'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(county,lead,round(accuracy, 2)));
             plt.legend()
             plt.savefig('Explanatory_plot_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
             
             plt.show() 
             plt.close()
+
+
+            
 
 
 
@@ -784,9 +1251,10 @@ for lead in leads:
     # x limite x-axis to 0 and 0.5 
     plt.ylim(0, means['stdev'].max()+0.2)
     plt.legend(loc='best')
-    plt.savefig(RESULT_FOLDER+'\\feature_importance_lead_%s.png'%(lead), dpi=300, bbox_inches='tight')
+    plt.savefig(PLOT_FOLDER+'\\feature_importance_lead_%s.png'%(lead), dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
+
 
 
 
@@ -912,7 +1380,7 @@ for i,lead in enumerate(leads):
 
 
 
-#%% save results
+    #%% save results
 #make new folder for results
 os.chdir(RESULT_FOLDER)
 if not os.path.exists(RESULT_FOLDER):
