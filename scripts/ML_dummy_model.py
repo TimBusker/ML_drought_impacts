@@ -99,6 +99,8 @@ hp_tuning=False
 with_NDMA=True
 with_TC=True
 clustering_all=True
+split_by_time=True
+
 #%% Define counties & read data
 counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
 
@@ -107,8 +109,12 @@ counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkan
 df=pd.read_excel('input_data.xlsx', index_col=0) # This df is until 2021-12, update with 2022 data! 
 df.drop('GP',axis=1, inplace=True)
 
+
+input_df=pd.DataFrame()
 features_stack=pd.DataFrame()
-labels_stack=pd.DataFrame()
+
+
+
 
 stats_df=pd.DataFrame(columns=('county', 'accuracy', 'accuracy_baseline', 'accuracy_baseline2','accuracy_lr', 'var_score','var_score_baseline','var_score_baseline2','var_score_lr', 'mae', 'mae_baseline', 'mae_baseline2','mae_lr', 'mse', 'mse_baseline', 'mse_baseline2', 'mse_lr', 'lead'))
 features_df=pd.DataFrame(columns=('county', 'feature', 'feature_imp', 'lead'))             
@@ -474,12 +480,17 @@ if hp_tuning==True:
 
 
 
+#####################################################################################################################
+################################################### INPUT DATAFRAME ###################################################
+#####################################################################################################################
 
-
-
-######################################## Create labels and features ######################################
+#  This dataframe will consist of all features/labels for all counties and all leads (1,4,8,12 months)
 
 for i,county in enumerate(counties): 
+    
+    ################################### create empty lead dataframe ###################################
+    features_l=pd.DataFrame() 
+
     print (county)
     print(i)
 
@@ -646,53 +657,110 @@ for i,county in enumerate(counties):
     if feature_engineering==True:
         #################################################### feature engineering for FEWS ####################################################
         #create a forward-filled column for FEWS_CS
-        features['FEWS_CS_FF']=features['FEWS_CS'].fillna(method='ffill')
+        features['base_ini']=features['FEWS_CS'].fillna(method='ffill')
         
-        # create a baseline ini 
-        base_ini=features['FEWS_CS_FF']
         # FEWS_CS lags, and fill nan values with mean of the column
-        features['FEWS_CS_lag1']=features['FEWS_CS_FF'].shift(1)
+        features['FEWS_CS_lag1']=features['base_ini'].shift(1)
         features['FEWS_CS_lag1'].fillna((features['FEWS_CS_lag1'].mean()), inplace=True)
 
-        features['FEWS_CS_lag2']=features['FEWS_CS_FF'].shift(2)
+        features['FEWS_CS_lag2']=features['base_ini'].shift(2)
         features['FEWS_CS_lag2'].fillna((features['FEWS_CS_lag2'].mean()), inplace=True)
 
-        features['FEWS_CS_lag3']=features['FEWS_CS_FF'].shift(3)
+        features['FEWS_CS_lag3']=features['base_ini'].shift(3)
         features['FEWS_CS_lag3'].fillna((features['FEWS_CS_lag3'].mean()), inplace=True)
         
-        features['FEWS_CS_lag4']=features['FEWS_CS_FF'].shift(4) # CHECK: FILL NANS WITH MEAN IS INCORRECT? --> FILL MEANS WITH JUST THE FEWS OBS COLUMN! 
+        features['FEWS_CS_lag4']=features['base_ini'].shift(4) # CHECK: FILL NANS WITH MEAN IS INCORRECT? --> FILL MEANS WITH JUST THE FEWS OBS COLUMN! 
         features['FEWS_CS_lag4'].fillna((features['FEWS_CS_lag4'].mean()), inplace=True)    
 
         # create new variables from rolling mean of existing features, where the preceding 4 months are used to calculate the mean. Do not include the current month 
-        features['FEWS_CS_roll_mean']=features['FEWS_CS_FF'].rolling(window=4).mean().shift(1)
+        features['FEWS_CS_roll_mean']=features['base_ini'].rolling(window=4).mean().shift(1)
         features['FEWS_CS_roll_mean'].fillna((features['FEWS_CS_roll_mean'].mean()), inplace=True)
         
 
     # One-hot encode the data using pandas get_dummies
     features = pd.get_dummies(features) 
-  
+    
+    
 
 
+    #################################################### Add lead times to dataframe ####################################################
+    if forecast==True:
+        # Shift features by the lead (1,4,8,12) months. This trains and tests the model with features from the past, creating a lag to predict the future.
+        for lead in leads:
+            if lead==0:
+                features_l=features.copy()
 
-    # remove the columns which contain the word 'county' and 'aridity' from features
-    features=features.loc[:, ~features.columns.str.contains('^county')]
-    features=features.loc[:, ~features.columns.str.contains('^aridity')]
 
-    # save target 
-    labels=features['FEWS_CS']
-    labels=pd.DataFrame(labels)
-    # add county as column
-    labels['county']=county
-
-    # Remove the target from the features
-    features= features.drop('FEWS_CS', axis = 1)# axis 1 refers to the columns
-    features=features.drop('FEWS_CS_FF', axis=1)
-    # add county as column
-    features['county']=county
+            else: 
+                features_l=features.copy()
+                # shift the features by the lead. Does NOT include FEWS_CS and base_ini columns
+                shift_columns=features_l.columns[~features_l.columns.isin(['FEWS_CS'])]
+                # shift only the columns that are not FEWS_CS and base_ini
+                features_l[shift_columns]=features_l[shift_columns].shift(lead)
+                
+                # remove the last X rows based on the lead
+                features_l=features_l.drop(features_l.index[:lead])
+            
+            # column management 
+            features_l=features_l.loc[:, ~features_l.columns.str.contains('^county')]
+            features_l=features_l.loc[:, ~features_l.columns.str.contains('^aridity')]
+            features_l['lead']=lead
+            features_l['county']=county
+            ############################# Create base forecast, to be used later #############################
+            features_l.rename(columns={'base_ini': 'base_forecast'}, inplace=True)
+            # add all leads individually to the input dataframe
+            input_df=pd.concat([input_df,features_l], axis=0)
+            
+    
+       
    
+    # Grid specs draft part
 
-    features_stack=pd.concat([features,features_stack], axis=0)
-    labels_stack=pd.concat([labels,labels_stack], axis=0)
+    # if grid_search==True: 
+    #     tss = TimeSeriesSplit(n_splits = 5, test_size=5)# 10-fold cross validation
+
+    #     for split, (train_index, test_index) in enumerate(tss.split(features_l)):
+    #         # features
+    #         train_features, test_features = features_l.iloc[train_index, :],features_l.iloc[test_index,:]
+    #         # labels 
+    #         train_labels, test_labels = labels_l.iloc[train_index], labels_l.iloc[test_index]
+    #         # time 
+    #         train_time, test_time = features_date_l.iloc[train_index, :],features_date_l.iloc[test_index,:]
+    #         # convert to numpy array
+    #         # features
+    #         feature_list2=feature_list.copy()
+    #         features_np = np.array(features_l)
+    #         train_features_np=np.array(train_features)
+    #         test_features_np=np.array(test_features)
+    #         # time
+    #         features_date_np=np.array(features_date_l)
+    #         train_time_np=np.array(train_time)
+    #         test_time_np=np.array(test_time)
+
+
+    # from sklearn.model_selection import GridSearchCV
+    # import warnings
+    # warnings.filterwarnings("ignore") #ignore all warnings in this cell
+
+    # parametergrid = { 
+    #     'n_estimators': [25, 50, 100],
+    #     'max_features': ['sqrt'],
+    #     'max_depth' : [5,7,9],
+    #     'random_state' : [18]
+    # }
+
+    # ## Grid Search function
+    # CV_rf = GridSearchCV(estimator=RandomForestRegressor(), param_grid=parametergrid, cv= 4, scoring = 'neg_mean_squared_error')
+    # CV_rf.fit(x_train, y_train)
+    
+    #rf = RandomForestClassifier(criterion = 'entropy', random_state = 42)
+    
+
+
+    
+    
+    
+    #labels_stack=pd.concat([labels,labels_stack], axis=0)
 
     # drop county_Garissa and aridity_arid columns
     # corr=features.drop(['county_Garissa','aridity_arid'], axis=1)
@@ -734,80 +802,63 @@ for i,county in enumerate(counties):
     #     return X
 
     # features = featureSelect_dataframe(features, labels, mutual_info_regression, 10)
-    
+
     
 
+
+#####################################################################################################################
+################################################### ML algorithms ###################################################
+#####################################################################################################################
 
 for i, county in enumerate(counties):
     print('County: ', county)
     # read in data
 
     if clustering_all==False:
-        features=features_stack[features_stack['county']==county]
-        features.dropna(axis=1, how='all', inplace=True)# drop nan values when whole column is nan (CROP column)
-        labels=labels_stack[labels_stack['county']==county]
-        
-    if clustering_all==True: 
-        features=features_stack.copy()
-        labels=labels_stack.copy()
+        input_df2=input_df[input_df['county']==county]
+        input_df2.dropna(axis=1, how='all', inplace=True)# drop nan values when whole column is nan (CROP column)
+    
 
+    
 
-
-        # keep only features with same index as the labels index, only if the county  is the same 
-        
-
-        
 
    
     feature_list2 = list(features.columns)
 
+    ############################################### START LEAD TIME LOOP ###############################################
     if forecast==True: 
-        # implement leads of 1,4 and 8, 12 months for all features, by shifting features X rows down based on lead 
-        
         for lead in leads: 
 
-            #################################################### Shifting dataframe ####################################################
-            features_l= features.copy()
-            
-            #cols_shift=list(features_l.columns)
-            #cols_shift.remove('FEWS_base')
-            
-            # Shift features by the lead (1,4,8,12) months. This trains and tests the model with features from the past, creating a lag to predict the future.
-            features_l=features_l.shift(lead)
-            
-            #remove the last X rows based on the lead
-            if lead!=0:
-                features_l=features_l.drop(features_l.index[:lead])
-
-            # after shifting, keep only the rows with index values that are in the labels dataframe
-
-
             ############################################### Deleting NANs ###############################################
+            # For label (FEWS_CS)
+            input_df2=input_df[input_df['FEWS_CS'].notna()] # no nans 
+            # For features
+            crop_cols=[col for col in input_df2.columns if 'crop' in col]
+            input_df2[crop_cols]=input_df2[crop_cols].fillna(input_df2.NDVI_crop.mean()) # fill nans of crop columns with mean of NDVI_crop column
             
-            # keep only the rows in features_l which are not nan in the labels dataframe
-            labels=labels.reset_index()
-            features_l=features_l.reset_index()
-            # keep only rows in features_l which are not nan in the labels dataframe
-            features_l=features_l.iloc[labels[labels['FEWS_CS'].notnull()].index]
+            ############################################### Select lead ###############################################
+            input_df3=input_df2[input_df2['lead']==lead]
+
+
 
             
-            # filter features_l based on the index values of the labels dataframe
-            # features_l=features_l.loc[labels.index] # DOESNT WORK! 
-
-            # remove county column from features and labels
-            features_l.drop('county', axis=1, inplace=True)
-            labels.drop('county', axis=1, inplace=True)
+            ############################################### Sort by date ###############################################
+            if split_by_time==True:
+                # sort on datetime index 
+                input_df3=input_df3.sort_index()
             
-            # remove nan values from labels
-            labels=labels.dropna(axis=0)
-            labels.set_index('index', inplace=True)
-            features_l.set_index('index', inplace=True)
-          
-    
+            ############################################### Base prediction ###############################################
+            base1_preds=input_df3['base_forecast']
 
+            ############################################### Create features- labels ###############################################
+            labels=pd.Series(input_df3['FEWS_CS'])
+            features=input_df3.drop(['FEWS_CS','lead', 'base_forecast'], axis=1)
 
-
-            ################################### Correlation analysis ###################################   
+            ############################################### Training-test split ###############################################            
+            train_features, test_features, train_labels, test_labels = train_test_split(features, labels, test_size = 0.20,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
+            print ('training years = %s-%s, testing years= %s-%s' %(train_features.index.year[0],train_features.index.year[-1],test_features.index.year[0],test_features.index.year[-1]))
+            
+            ############################################### Correlation analysis ###################################   
             # correlations= features_l.drop(features_l.columns[-2:], axis=1).corr()
 
 
@@ -833,11 +884,8 @@ for i, county in enumerate(counties):
             #             mask=mask)
             
             # plt.title('Correlation matrix for %s months lead, county= %s'%(lead, county))
-            labels=pd.Series(labels['FEWS_CS'])
+            
 
-
-            #################################################### split data into training and testing sets ####################################################
-            train_features, test_features, train_labels, test_labels = train_test_split(features_l, labels, test_size = 0.25,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
 
 
 
@@ -865,63 +913,13 @@ for i, county in enumerate(counties):
             train_dates_np=np.array(train_dates) #real original time stamps 
             test_dates_np=np.array(test_dates) #real original time stamps 
 
-
-            # Grid specs draft part
-
-            # if grid_search==True: 
-            #     tss = TimeSeriesSplit(n_splits = 5, test_size=5)# 10-fold cross validation
-
-            #     for split, (train_index, test_index) in enumerate(tss.split(features_l)):
-            #         # features
-            #         train_features, test_features = features_l.iloc[train_index, :],features_l.iloc[test_index,:]
-            #         # labels 
-            #         train_labels, test_labels = labels_l.iloc[train_index], labels_l.iloc[test_index]
-            #         # time 
-            #         train_time, test_time = features_date_l.iloc[train_index, :],features_date_l.iloc[test_index,:]
-            #         # convert to numpy array
-            #         # features
-            #         feature_list2=feature_list.copy()
-            #         features_np = np.array(features_l)
-            #         train_features_np=np.array(train_features)
-            #         test_features_np=np.array(test_features)
-            #         # time
-            #         features_date_np=np.array(features_date_l)
-            #         train_time_np=np.array(train_time)
-            #         test_time_np=np.array(test_time)
-
-
-            # from sklearn.model_selection import GridSearchCV
-            # import warnings
-            # warnings.filterwarnings("ignore") #ignore all warnings in this cell
-
-            # parametergrid = { 
-            #     'n_estimators': [25, 50, 100],
-            #     'max_features': ['sqrt'],
-            #     'max_depth' : [5,7,9],
-            #     'random_state' : [18]
-            # }
-
-            # ## Grid Search function
-            # CV_rf = GridSearchCV(estimator=RandomForestRegressor(), param_grid=parametergrid, cv= 4, scoring = 'neg_mean_squared_error')
-            # CV_rf.fit(x_train, y_train)
-            
-            #rf = RandomForestClassifier(criterion = 'entropy', random_state = 42)
-            
             
             ############################################### Baseline models ###############################################
 
 
             ######################## baseline 1: make a prediction X months ahead, based on the FEWS_base value of the current time step ########################
-            # take the original FEWS values, shift X months forward in time and use this as the prediction
-            base_ini.dropna(inplace=True) # base_ini created in line 284
-            base1_preds=base_ini.shift(lead) 
-
-            # remove the first X rows based on the lead. Prediction for these months is not existing since they are outside the time series
-            if lead!=0:
-                base1_preds=base1_preds.drop(base1_preds.index[:lead])
-            
-            # keep only the base1_preds index if the index is in the test_labels index. 
-            base1_preds=base1_preds[base1_preds.index.isin(test_labels.index)]
+            # extract the base_forecast column from the test_features dataframe
+            base1_preds=base1_preds.iloc[-len(test_features):]
 
             # Baseline errors, and display average baseline error
             base1_errors = abs(base1_preds - test_labels)
