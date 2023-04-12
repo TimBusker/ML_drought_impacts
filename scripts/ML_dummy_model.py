@@ -98,23 +98,18 @@ random_split=False
 hp_tuning=False
 with_NDMA=True
 with_TC=True
-clustering_all=True
+clustering_all=False
 split_by_time=True
 
 #%% Define counties & read data
-counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui']#,'Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
+counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
 
 
     
 df=pd.read_excel('input_data.xlsx', index_col=0) # This df is until 2021-12, update with 2022 data! 
 df.drop('GP',axis=1, inplace=True)
 
-
 input_df=pd.DataFrame()
-features_stack=pd.DataFrame()
-
-
-
 
 stats_df=pd.DataFrame(columns=('county', 'accuracy', 'accuracy_baseline', 'accuracy_baseline2','accuracy_lr', 'var_score','var_score_baseline','var_score_baseline2','var_score_lr', 'mae', 'mae_baseline', 'mae_baseline2','mae_lr', 'mse', 'mse_baseline', 'mse_baseline2', 'mse_lr', 'lead'))
 features_df=pd.DataFrame(columns=('county', 'feature', 'feature_imp', 'lead'))             
@@ -189,7 +184,7 @@ feature_names=pd.DataFrame(df.columns, columns=['feature'])
 
 
 
-######################################### Hyper parameters tuning #########################################
+############################# ############ Hyper parameters tuning #########################################
 
 if hp_tuning==True: 
     for i,county in enumerate(counties): 
@@ -489,7 +484,7 @@ if hp_tuning==True:
 ################################################### INPUT DATAFRAME ###################################################
 #####################################################################################################################
 
-#  This dataframe will consist of all features/labels for all counties and all leads (1,4,8,12 months)
+#  This dataframe will consist of all features/labels for all counties and all leads
 
 for i,county in enumerate(counties): 
 
@@ -543,7 +538,7 @@ for i,county in enumerate(counties):
         features[column].fillna((features[column].mean()), inplace=True) # CHECK IF THIS IS CORRECT
 
 
-    if fill_nans_target==True:
+    if fill_nans_target==True: #Default: False
         #features['FEWS_CS']=features['FEWS_CS'].interpolate(method='time',limit_area='inside')
         features['FEWS_CS']=features['FEWS_CS'].fillna(method="ffill")
     
@@ -560,14 +555,14 @@ for i,county in enumerate(counties):
    
 
     if feature_engineering==True:
-        # add rolling mean for 4 months and 12 months
-        #     
+        ############################################# ROLLING MEANS  #############################################
+        # NDVI, WD, DS, MAIZE PRICE
         features['NDVI_roll_mean']=features['NDVI'].rolling(window=4).mean().shift(1)
         features['NDVI_range_roll_mean']=features['NDVI_range'].rolling(window=4).mean().shift(1)
         features['NDVI_crop_roll_mean']=features['NDVI_crop'].rolling(window=4).mean().shift(1)
         features['wd_roll_mean']=features['wd'].rolling(window=4).mean().shift(1)
         features['ds_roll_mean']=features['ds'].rolling(window=4).mean().shift(1)
-        features['maize_price_roll_mean']=features['maize_price'].rolling(window=4).mean().shift(1)
+        
 
         features['NDVI_roll_mean_12']=features['NDVI'].rolling(window=12).mean().shift(1)
         features['NDVI_range_roll_mean_12']=features['NDVI_range'].rolling(window=12).mean().shift(1)
@@ -575,6 +570,30 @@ for i,county in enumerate(counties):
         features['wd_roll_mean_12']=features['wd'].rolling(window=12).mean().shift(1)
         features['ds_roll_mean_12']=features['ds'].rolling(window=12).mean().shift(1)
         
+
+        # maize prices 
+        if food_prices_county.empty:
+            pass
+        else:
+            features['maize_price_roll_mean']=features['maize_price'].rolling(window=4).mean().shift(1)
+            features['maize_price_roll_mean_12']=features['maize_price'].rolling(window=12).mean().shift(1)
+            
+
+        # SST indicators (WVG, IOD, MEI, NINA34)
+        if with_TC==True: 
+            
+            features['WVG_roll_mean']=features['WVG'].rolling(window=4).mean().shift(1)
+            features['IOD_roll_mean']=features['IOD'].rolling(window=4).mean().shift(1)
+            features['MEI_roll_mean']=features['MEI'].rolling(window=4).mean().shift(1)
+            features['NINA34_roll_mean']=features['NINA34'].rolling(window=4).mean().shift(1)
+
+            features['WVG_roll_mean_12']=features['WVG'].rolling(window=12).mean().shift(1)
+            features['IOD_roll_mean_12']=features['IOD'].rolling(window=12).mean().shift(1)
+            features['MEI_roll_mean_12']=features['MEI'].rolling(window=12).mean().shift(1)
+            features['NINA34_roll_mean_12']=features['NINA34'].rolling(window=12).mean().shift(1)
+
+        ############################################# FILL NANs #############################################
+
         # fill nan values that came out of rolling
         features['NDVI_roll_mean'].fillna((features['NDVI_roll_mean'].mean()), inplace=True) # check: fillna with mean is incorrect! 
         features['NDVI_range_roll_mean'].fillna((features['NDVI_range_roll_mean'].mean()), inplace=True)
@@ -588,31 +607,7 @@ for i,county in enumerate(counties):
         features['wd_roll_mean_12'].fillna((features['wd_roll_mean_12'].mean()), inplace=True)
         features['ds_roll_mean_12'].fillna((features['ds_roll_mean_12'].mean()), inplace=True)
 
-
-
-        ######################### rolling operations for maize prices #########################
-        # maize prices 
-        if food_prices_county.empty:
-            pass
-        else:
-            features['maize_price_roll_mean_12']=features['maize_price'].rolling(window=12).mean().shift(1)
-            
-            # fill nan values that came out of rolling for maize price
-            features['maize_price_roll_mean'].fillna((features['maize_price_roll_mean'].mean()), inplace=True)# check: incorrect nan filling. Fill with obs 
-            features['maize_price_roll_mean_12'].fillna((features['maize_price_roll_mean_12'].mean()), inplace=True)
-
-        # rolling operations for SST indicators (WVG, IOD, MEI, NINA34)
         if with_TC==True: 
-            features['WVG_roll_mean']=features['WVG'].rolling(window=4).mean().shift(1)
-            features['IOD_roll_mean']=features['IOD'].rolling(window=4).mean().shift(1)
-            features['MEI_roll_mean']=features['MEI'].rolling(window=4).mean().shift(1)
-            features['NINA34_roll_mean']=features['NINA34'].rolling(window=4).mean().shift(1)
-
-            features['WVG_roll_mean_12']=features['WVG'].rolling(window=12).mean().shift(1)
-            features['IOD_roll_mean_12']=features['IOD'].rolling(window=12).mean().shift(1)
-            features['MEI_roll_mean_12']=features['MEI'].rolling(window=12).mean().shift(1)
-            features['NINA34_roll_mean_12']=features['NINA34'].rolling(window=12).mean().shift(1)
-
             # fill nan values that came out of rolling
             features['WVG_roll_mean'].fillna((features['WVG_roll_mean'].mean()), inplace=True)
             features['IOD_roll_mean'].fillna((features['IOD_roll_mean'].mean()), inplace=True)
@@ -624,6 +619,10 @@ for i,county in enumerate(counties):
             features['MEI_roll_mean_12'].fillna((features['MEI_roll_mean_12'].mean()), inplace=True)
             features['NINA34_roll_mean_12'].fillna((features['NINA34_roll_mean_12'].mean()), inplace=True)
 
+        if len(food_prices_county)>0:
+            # fill nan values that came out of rolling for maize price
+            features['maize_price_roll_mean'].fillna((features['maize_price_roll_mean'].mean()), inplace=True)# check: incorrect nan filling. Fill with obs 
+            features['maize_price_roll_mean_12'].fillna((features['maize_price_roll_mean_12'].mean()), inplace=True)
 
 
     # drop nan values when whole column is nan (CROP column)
@@ -656,20 +655,20 @@ for i,county in enumerate(counties):
         
         # FEWS_CS lags, and fill nan values with mean of the column
         features['FEWS_CS_lag1']=features['base_ini'].shift(1)
-        features['FEWS_CS_lag1'].fillna((features['FEWS_CS_lag1'].mean()), inplace=True)
+        features['FEWS_CS_lag1'].fillna((features['base_ini'].mean()), inplace=True)
 
         features['FEWS_CS_lag2']=features['base_ini'].shift(2)
-        features['FEWS_CS_lag2'].fillna((features['FEWS_CS_lag2'].mean()), inplace=True)
+        features['FEWS_CS_lag2'].fillna((features['base_ini'].mean()), inplace=True)
 
         features['FEWS_CS_lag3']=features['base_ini'].shift(3)
-        features['FEWS_CS_lag3'].fillna((features['FEWS_CS_lag3'].mean()), inplace=True)
+        features['FEWS_CS_lag3'].fillna((features['base_ini'].mean()), inplace=True)
         
         features['FEWS_CS_lag4']=features['base_ini'].shift(4) # CHECK: FILL NANS WITH MEAN IS INCORRECT? --> FILL MEANS WITH JUST THE FEWS OBS COLUMN! 
-        features['FEWS_CS_lag4'].fillna((features['FEWS_CS_lag4'].mean()), inplace=True)    
+        features['FEWS_CS_lag4'].fillna((features['base_ini'].mean()), inplace=True)    
 
         # create new variables from rolling mean of existing features, where the preceding 4 months are used to calculate the mean. Do not include the current month 
         features['FEWS_CS_roll_mean']=features['base_ini'].rolling(window=4).mean().shift(1)
-        features['FEWS_CS_roll_mean'].fillna((features['FEWS_CS_roll_mean'].mean()), inplace=True)
+        features['FEWS_CS_roll_mean'].fillna((features['base_ini'].mean()), inplace=True)
         
 
     # One-hot encode the data using pandas get_dummies
@@ -690,7 +689,7 @@ for i,county in enumerate(counties):
                 features_l=features.copy()
                 # shift the features by the lead. Does NOT include FEWS_CS and base_ini columns
                 shift_columns=features_l.columns[~features_l.columns.isin(['FEWS_CS'])]
-                # shift only the columns that are not FEWS_CS and base_ini
+                # shift only the columns that are not FEWS_CS 
                 features_l[shift_columns]=features_l[shift_columns].shift(lead)
                 
                 # remove the last X rows based on the lead
@@ -758,6 +757,7 @@ for i, county in enumerate(counties):
             maize_cols=[col for col in input_df2.columns if 'maize' in col]
             if len(maize_cols)>0:
                 input_df2[maize_cols]=input_df2[maize_cols].fillna(input_df2.maize_price.mean()) # fill nans of maize columns with mean of maize_price column
+            
             ############################################### Select lead ###############################################
             input_df3=input_df2[input_df2['lead']==lead]
             
@@ -909,60 +909,8 @@ for i, county in enumerate(counties):
             # Use the forest's predict method on the test data
             predictions = rf.predict(test_features) ## rf predictions for the months with lead ahead 
             
-
             
-
-            ############################################### Evaluate ###############################################
-
-            # note: test_labels are for X months ahead, according to the lead
-            ############################# general errors #############################
-            base1_errors = abs(base1_preds - test_labels)
-            base2_errors = abs(base2_preds - test_labels)        
-            lr_errors = abs(lr_preds - test_labels)
-            errors = abs(predictions - test_labels)
-                        
-            ############################# accuracy #############################
-            # Calculate mean absolute percentage error (MAPE) 
-            mape = 100 * (errors / test_labels) 
-            mape_baseline1= 100 * (base1_errors / test_labels)
-            mape_baseline2= 100 * (base2_errors / test_labels)
-            mape_lr= 100 * (lr_errors / test_labels)
-            
-            # Calculate and display accuracy
-            accuracy = 100 - np.mean(mape)
-            accuracy_baseline= 100 - np.mean(mape_baseline1)
-            accuracy_baseline2= 100 - np.mean(mape_baseline2)
-            accuracy_lr= 100 - np.mean(mape_lr)
-
-            ############################# r2 score #############################
-
-            # Explained variance score: 1 is perfect prediction
-            var_score = r2_score(test_labels, predictions)
-            var_score_baseline= r2_score(test_labels, base1_preds)
-            var_score_baseline2= r2_score(test_labels, base2_preds)
-            var_score_lr= r2_score(test_labels, lr_preds)
-
-            ############################# mean absolute error #############################
-            mae = mean_absolute_error(test_labels, predictions)
-            mae_baseline= mean_absolute_error(test_labels, base1_preds)
-            mae_baseline2= mean_absolute_error(test_labels, base2_preds)
-            mae_lr= mean_absolute_error(test_labels, lr_preds)
-
-            ############################# mean squared error #############################
-            mse = mean_squared_error(test_labels, predictions)
-            mse_baseline= mean_squared_error(test_labels, base1_preds)
-            mse_baseline2= mean_squared_error(test_labels, base2_preds)
-            mse_lr= mean_squared_error(test_labels, lr_preds)
-
-            ############################# root mean squared error ############################# 
-            rmse = np.sqrt(mean_squared_error(test_labels, predictions))
-            rmse_baseline= np.sqrt(mean_squared_error(test_labels, base1_preds))
-            rmse_baseline2= np.sqrt(mean_squared_error(test_labels, base2_preds))
-            rmse_lr= np.sqrt(mean_squared_error(test_labels, lr_preds))
-
-
-            
-            # Visualize trees --> use dtreeviz package in future? 
+            ########################################## Visualize trees --> use dtreeviz package in future?  ###################################
         
             #Pull out one tree from the forest
             os.chdir(TREE_FOLDER)
@@ -1009,11 +957,14 @@ for i, county in enumerate(counties):
             #plt.savefig(PLOT_FOLDER+'\\shap_summary_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
             #plt.close()
 
-            # dependence plot 
-            plt.figure()
-            shap.dependence_plot('rank(1)', shap_vals, train_features) # rank(1) is the most important feature
-            plt.title('Dependence plot for %s, L%s'%(county,lead))
-            plt.savefig(PLOT_FOLDER+'\\shap_dependence_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
+            # dependence plot
+            ranks=[0,1,2,3,4]# Rank 1,2,3,4
+             
+            for rank in ranks:
+                shap.dependence_plot('rank(%s)'%rank, shap_vals, train_features, show=False)
+                plt.title('Dependence plot for %s, L%s'%(county,lead))
+                plt.savefig(PLOT_FOLDER+'\\shap_dependence_plot_L%s_%s_rank%s.png'%(lead,county,rank), bbox_inches='tight')
+                plt.close()
 
             # beeswarm plot
             shap.plots.beeswarm(shap_explainer, show=False)
@@ -1058,9 +1009,11 @@ for i, county in enumerate(counties):
 
             labels=pd.DataFrame(labels)
             labels.reset_index(inplace=True) # reset index to get the original datestamps
+            
             # predictions 
             predictions= pd.DataFrame(predictions)
             lr_preds= pd.DataFrame(lr_preds)
+            
             # base predictions 
             base1_preds= pd.DataFrame(base1_preds).reset_index().drop('index', axis=1)
             base2_preds= pd.DataFrame(base2_preds).reset_index().drop('index', axis=1)
@@ -1091,16 +1044,67 @@ for i, county in enumerate(counties):
                 
                 predictions_data = pd.DataFrame(data = {'date': test_labels_county.index, 'prediction': predictions_county.values.flatten(),'lr':lr_preds_county.values.flatten(), 'base1_preds':base1_preds_county.values.flatten(), 'base2_preds':base2_preds_county.values.flatten()}) # Dataframe with predictions and dates
 
+                ######################### Evaluation #############################
+        
+                # note: test_labels are for X months ahead, according to the lead
+                test_values=test_labels_county.values.flatten() 
+                ############################# general errors #############################
+                base1_errors = abs(predictions_data['base1_preds'] - test_values)
+                base2_errors = abs(predictions_data['base2_preds'] - test_values)        
+                lr_errors = abs(predictions_data['lr'] - test_values)
+                errors = abs(predictions_data['prediction'] - test_values)
+                            
+                ############################# accuracy #############################
+                # Calculate mean absolute percentage error (MAPE) 
+                mape = 100 * (errors / test_values) 
+                mape_baseline1= 100 * (base1_errors / test_values)
+                mape_baseline2= 100 * (base2_errors / test_values)
+                mape_lr= 100 * (lr_errors / test_values)
+                
+                # Calculate and display accuracy
+                accuracy = 100 - np.mean(mape)
+                accuracy_baseline= 100 - np.mean(mape_baseline1)
+                accuracy_baseline2= 100 - np.mean(mape_baseline2)
+                accuracy_lr= 100 - np.mean(mape_lr)
+
+                ############################# r2 score #############################
+
+                # Explained variance score: 1 is perfect prediction
+                var_score = r2_score(test_values, predictions_data['prediction'])
+                var_score_baseline= r2_score(test_values, predictions_data['base1_preds'])
+                var_score_baseline2= r2_score(test_values, predictions_data['base2_preds'])
+                var_score_lr= r2_score(test_values, predictions_data['lr'])
+
+                ############################# mean absolute error #############################
+                mae = mean_absolute_error(test_values, predictions_data['prediction'])
+                mae_baseline= mean_absolute_error(test_values, predictions_data['base1_preds'])
+                mae_baseline2= mean_absolute_error(test_values, predictions_data['base2_preds'])
+                mae_lr= mean_absolute_error(test_values, predictions_data['lr'])
+
+                ############################# mean squared error #############################
+                mse = mean_squared_error(test_values, predictions_data['prediction'])
+                mse_baseline= mean_squared_error(test_values, predictions_data['base1_preds'])
+                mse_baseline2= mean_squared_error(test_values, predictions_data['base2_preds'])
+                mse_lr= mean_squared_error(test_values, predictions_data['lr'])
+
+                ############################# root mean squared error ############################# 
+                rmse = np.sqrt(mean_squared_error(test_values, predictions_data['prediction']))
+                rmse_baseline= np.sqrt(mean_squared_error(test_values, predictions_data['base1_preds']))
+                rmse_baseline2= np.sqrt(mean_squared_error(test_values, predictions_data['base2_preds']))
+                rmse_lr= np.sqrt(mean_squared_error(test_values, predictions_data['lr']))
+
+
+                ############################### Evaluation stats per county ########################################
+                var_list= [c,round(accuracy, 2), round(accuracy_baseline, 2), round(accuracy_baseline2, 2), round(accuracy_lr,2), round(var_score, 2), round(var_score_baseline, 2),round(var_score_baseline2, 2), round(var_score_lr,2), round(mse,2), round(mse_baseline,2), round(mse_baseline2,2), round(mse_lr,2), round(mae,2), round(mae_baseline,2), round(mae_baseline2,2), round(mae_lr,2),lead]         
+                stats_df.loc[len(stats_df), :] = var_list
 
                 ############################################### Plot predictions ###############################################
+
                 #load target obs
                 target_obs=labels_county.set_index('index').copy()
                 #load feature obs
                 #extract names from 2 most important features from feature importance tuples 
-                
 
-            
-                
                 fig, ax = plt.subplots(figsize=(10, 5))
                 # Plot the actual values
                 plt.plot(target_obs.index,target_obs['FEWS_CS'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
@@ -1150,20 +1154,6 @@ for i, county in enumerate(counties):
                 plt.show() 
                 plt.close()
          
-                ############################### Evaluation stats per county ########################################
-
-
-                var_list= [c,round(accuracy, 2), round(accuracy_baseline, 2), round(accuracy_baseline2, 2), round(accuracy_lr,2), round(var_score, 2), round(var_score_baseline, 2),round(var_score_baseline2, 2), round(var_score_lr,2), round(mse,2), round(mse_baseline,2), round(mse_baseline2,2), round(mse_lr,2), round(mae,2), round(mae_baseline,2), round(mae_baseline2,2), round(mae_lr,2),lead]         
-                stats_df.loc[len(stats_df), :] = var_list
-
-                ############################### main feature importance feature importance per county ########################################
-                var_list=[c, main_feature, feature_imp, lead]
-                features_df.loc[len(features_df), :] = var_list
-
-                ############################### feature importance per county ########################################
-
-#stats_df=pd.read_csv(RESULT_FOLDER+'\\stats_df2.csv')
-# feature_df=pd.read_csv(RESULT_FOLDER+'\\features_df2.csv')
 
 
 
@@ -1185,14 +1175,17 @@ for lead in leads:
     means.rename(columns={'importance':'mean'}, inplace=True)
     # sort values
     means=means.sort_values(by='mean', ascending=False)
-    # get stdev of feature importance per feature
-    stdev=features_df_lead.groupby('index').std()
-    # rename importance column to stdev
-    stdev.rename(columns={'importance':'stdev'}, inplace=True)
-
-    # merge stdev and mean on column with index as name 
-    means=means.merge(stdev['stdev'], left_index=True, right_index=True)
     
+    if clustering_all==False:
+        # get stdev of feature importance over counties (stdev indicates spread between countries)
+        stdev=features_df_lead.groupby('index').std()
+        # rename importance column to stdev
+        stdev.rename(columns={'importance':'stdev'}, inplace=True)
+
+        # merge stdev and mean on column with index as name 
+        means=means.merge(stdev['stdev'], left_index=True, right_index=True)
+    else: 
+        means['stdev']=0
     # plot feature importance per lead time
     plt.figure(figsize=(10, 5))
     plt.bar(means.index, means['mean'], yerr=means['stdev'], align='center', label='L=%s'%(lead))
@@ -1205,10 +1198,6 @@ for lead in leads:
     plt.savefig(PLOT_FOLDER+'\\feature_importance_lead_%s.png'%(lead), dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
-
-
-
-
 
 
 ############################################## evaluation plots ####################################
@@ -1338,7 +1327,7 @@ if not os.path.exists(RESULT_FOLDER):
     os.makedirs(RESULT_FOLDER)
 #save results in new folder     
 stats_df.to_csv('stats_df2.csv')
-features_df.to_csv('features_df2.csv')
+#features_df.to_csv('features_df2.csv')
 
 
 
