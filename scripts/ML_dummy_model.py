@@ -3,6 +3,15 @@
 Created on Mon Jan 23 15:33:24 2023
 
 @author: tbr910
+
+This script makes use of the following scripts and input data 
+
+1. Pure drought impact data: impact_df_creation.py --> impacts_county_level.xlsx
+2. Meteo data: meteo_vars.py --> input_data2.xlsx
+3. ML model: ML_dummy_model.py --> ML_dummy_model.py
+
+Functions are being called from ML_functions.py and function_def.py. This needs to be merged to one script.
+
 """
 
 #%% 
@@ -76,12 +85,32 @@ shap.initjs() # load JS visualization code to notebook
 #import lightgbm as lgb
 #from tensorflow.keras import regularizers
 
-Aggregation_level=['county','all'] #cluster
+
+
+
+################## define master variables 
+Aggregation_level=['cluster','county'] #cluster
+
+
+feature_engineering=True #without feature engineering the errors are much higher (almost 2x)   
+forecast=True
+fill_nans_target=False
+leads=[0,4,8,12] # check:  12 lead creates quite some nan's in the training data 
+random_split=False
+hp_tuning=False
+with_NDMA=True
+with_TC=True
+split_by_time=True
+
+counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo']#,'Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
+
+
+
 
 for aggregation in Aggregation_level:
     #input data 
     DATA_FOLDER = 'C:\\Users\\tbr910\\Documents\\Forecast_action_analysis\\'
-    SST_FOLDER = 'C:\\Users\\tbr910\\Documents\\ML\\SE_data\\climate_vars'
+    CLIM_FOLDER = 'C:\\Users\\tbr910\\Documents\\ML\\SE_data\\climate_vars'
     SE_FOLDER= 'C:\\Users\\tbr910\\Documents\\ML\\SE_data\\'
     # results 
     BASE_FOLDER = 'C:\\Users\\tbr910\\Documents\\ML\\'
@@ -100,24 +129,9 @@ for aggregation in Aggregation_level:
 
 
     os.chdir(BASE_FOLDER)
-    #%% define master variables 
-    feature_engineering=True #without feature engineering the errors are much higher (almost 2x)   
-    forecast=True
-    fill_nans_target=False
-    leads=[0,4,8,12] # check:  12 lead creates quite some nan's in the training data 
-    random_split=False
-    hp_tuning=False
-    with_NDMA=True
-    with_TC=True
-
-    split_by_time=True
-
-    #%% Define counties & read data
-    counties=['Garissa','Isiolo','Mandera','Marsabit','Samburu','Tana River','Turkana','Wajir','Baringo','Kajiado','Kilifi','Kitui','Laikipia','Makueni','Meru','Taita Taveta','Tharaka','West Pokot','Lamu','Nyeri','Narok']
-
 
         
-    df=pd.read_excel('input_data.xlsx', index_col=0) # This df is until 2021-12, update with 2022 data! 
+    df=pd.read_excel('input_data2.xlsx', index_col=0) # This df is until 2021-12, update with 2022 data! 
     df.drop('GP',axis=1, inplace=True)
 
     input_df=pd.DataFrame()
@@ -127,15 +141,38 @@ for aggregation in Aggregation_level:
     features_df_full=pd.DataFrame()
     best_params_df=pd.DataFrame()
 
-    ############################################# get extra socio economic data #############################################
 
 
+
+    ############################################# get extra data #############################################
+
+    ###################### HUMANITARIAN DATA ######################
+    os.chdir(DATA_FOLDER+'\\impacts\\FEWS')
+    
     ###################### ACLED ###################### https://acleddata.com/data/acled-api/
-
+    #for codebook, see https://acleddata.com/acleddatanew/wp-content/uploads/2021/11/ACLED_Codebook_v1_January-2021.pdf
+    os.chdir(SE_FOLDER)
+    acled=pd.read_csv([i for i in os.listdir() if 'acled' in i][0], index_col=0)
+    acled_kenya=acled[acled['country']=='Kenya']
+    # extract event date, admin1, and fatalities (later maybe also source scale?) #assoc_actor_1 contains pastoralists!! May be of use 
+    acled_kenya=acled_kenya[['event_date','admin1','fatalities']]
+    # datetime management 
+    acled_kenya['event_date']=pd.to_datetime(acled_kenya['event_date'])
+    acled_kenya.set_index('event_date',inplace=True)
+    acled_kenya.rename(columns={'admin1':'county','fatalities':'acled_fatalities'}, inplace=True)
+    
     ##################### FSNAU for Somalia ##################### https://data.humdata.org/dataset/fsna-2019-2020-somalia
 
-    ######################  food prices ###################### https://data.humdata.org/dataset/wfp-food-prices-for-kenya
 
+    ###################### Soil Moisture (root_zone and surface) ######################
+
+    os.chdir(CLIM_FOLDER+'\\Gleam')   
+
+    sm_root=pd.read_excel([i for i in os.listdir() if ('SMroot' in i) & ('.xlsx' in i)][0], index_col=0)
+    sm_surf=pd.read_excel([i for i in os.listdir() if ('SMsurf' in i) & ('.xlsx' in i)][0], index_col=0)
+
+
+    ######################  food prices ###################### https://data.humdata.org/dataset/wfp-food-prices-for-kenya
     os.chdir(SE_FOLDER)
     food_prices= pd.read_csv('food_prices.csv', index_col=0, header=1, delimiter=',')
     # get header names from dataframe and simplify the names
@@ -164,22 +201,22 @@ for aggregation in Aggregation_level:
     ########################## load SST index data ##########################
     if with_TC==True: 
         # WVG processed sheet
-        WVG=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='WVG_processed', index_col=0, header=0)
+        WVG=pd.read_excel(CLIM_FOLDER+'\\SST_index.xlsx', sheet_name='WVG_processed', index_col=0, header=0)
 
         # shift WVG one row forward 
         WVG=WVG.shift(1)
         # For WVG, ffill the missing values 
         WVG.fillna(method='ffill', inplace=True)
         # MEI sheet 
-        MEI=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='MEI', index_col=0, header=0)
+        MEI=pd.read_excel(CLIM_FOLDER+'\\SST_index.xlsx', sheet_name='MEI', index_col=0, header=0)
         # remove rows with values <-10
         MEI=MEI[MEI['MEI']>-10]
         # NINA34 sheet
-        NINA34=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='NINA34', index_col=0, header=0)
+        NINA34=pd.read_excel(CLIM_FOLDER+'\\SST_index.xlsx', sheet_name='NINA34', index_col=0, header=0)
         # remove rows with values <-10
         NINA34=NINA34[NINA34['NINA34']>-10]
         # IOD sheet
-        IOD=pd.read_excel(SST_FOLDER+'\\SST_index.xlsx', sheet_name='IOD', index_col=0, header=0)
+        IOD=pd.read_excel(CLIM_FOLDER+'\\SST_index.xlsx', sheet_name='IOD', index_col=0, header=0)
         # convert index to datetime
         IOD.index=pd.to_datetime(IOD.index)
 
@@ -228,6 +265,7 @@ for aggregation in Aggregation_level:
             food_prices_county=food_prices_county.groupby(food_prices_county.index).mean()
             # print list of missing months in the index
             #print(food_prices_county.index[~food_prices_county.index.isin(features.index)])
+            
             
             # add food prices to features as a new column, for the same datetime index. Keep all rows in features, even if there is no food price data for that month
             features=features.merge(food_prices_county, how='left', left_index=True, right_index=True)
@@ -513,7 +551,7 @@ for aggregation in Aggregation_level:
             features.drop(NDMA_indicators, axis=1, inplace=True)
 
 
-        ########################## merge SST data with features df ##########################
+        ########################## SST data ##########################
         if with_TC==True:
             features=features.merge(WVG, how='left', left_index=True, right_index=True)# merge WVG to features df
             features=features.merge(MEI, how='left', left_index=True, right_index=True)# merge MEI to features df
@@ -521,7 +559,7 @@ for aggregation in Aggregation_level:
             features=features.merge(IOD, how='left', left_index=True, right_index=True)# merge IOD to features df
 
 
-        ############################################# Merge food prices #############################################
+        ############################################# Food prices #############################################
         
 
         # merge food prices for a county with the features dataframe
@@ -537,7 +575,27 @@ for aggregation in Aggregation_level:
         features=features.merge(food_prices_county, how='left', left_index=True, right_index=True)
 
 
+        ############################################# soil moisture #############################################
+        sm_root_county=sm_root[county]
+        sm_surf_county=sm_surf[county]
+        # rename pandas series to 'sm_root'
+        sm_root_county.rename('sm_root', inplace=True)
+        sm_surf_county.rename('sm_surf', inplace=True)
 
+        # add soil moisture to features as a new column
+        features=features.merge(sm_root_county, how='left', left_index=True, right_index=True)
+        features=features.merge(sm_surf_county, how='left', left_index=True, right_index=True)
+
+
+        ############################################# Conflicts  #############################################
+        acled_county=acled_kenya[acled_kenya['county']==county]
+        acled_county['acled_count']=1
+        acled_county=acled_county.resample('MS').sum()
+        
+        # merge with features
+        features=features.merge(acled_county, how='left', left_index=True, right_index=True)
+        
+        
 
         ############################################# NAN values processing #############################################
 
@@ -567,20 +625,24 @@ for aggregation in Aggregation_level:
 
         if feature_engineering==True:
             ############################################# ROLLING MEANS  #############################################
-            # NDVI, WD, DS, MAIZE PRICE
+            # NDVI, WD, DS, MAIZE PRICE, soil moisture
             features['NDVI_roll_mean']=features['NDVI'].rolling(window=4).mean().shift(1)
             features['NDVI_range_roll_mean']=features['NDVI_range'].rolling(window=4).mean().shift(1)
             features['NDVI_crop_roll_mean']=features['NDVI_crop'].rolling(window=4).mean().shift(1)
             features['wd_roll_mean']=features['wd'].rolling(window=4).mean().shift(1)
             features['ds_roll_mean']=features['ds'].rolling(window=4).mean().shift(1)
-            
+            features['sm_root_roll_mean']=features['sm_root'].rolling(window=4).mean().shift(1)
+            features['sm_surf_roll_mean']=features['sm_surf'].rolling(window=4).mean().shift(1)
+            features['acled_count_roll_mean']=features['acled_count'].rolling(window=4).mean().shift(1)
 
             features['NDVI_roll_mean_12']=features['NDVI'].rolling(window=12).mean().shift(1)
             features['NDVI_range_roll_mean_12']=features['NDVI_range'].rolling(window=12).mean().shift(1)
             features['NDVI_crop_roll_mean_12']=features['NDVI_crop'].rolling(window=12).mean().shift(1)
             features['wd_roll_mean_12']=features['wd'].rolling(window=12).mean().shift(1)
             features['ds_roll_mean_12']=features['ds'].rolling(window=12).mean().shift(1)
-            
+            features['sm_root_roll_mean_12']=features['sm_root'].rolling(window=12).mean().shift(1)
+            features['sm_surf_roll_mean_12']=features['sm_surf'].rolling(window=12).mean().shift(1)
+            features['acled_count_roll_mean_12']=features['acled_count'].rolling(window=12).mean().shift(1)
 
             # maize prices 
             if food_prices_county.empty:
@@ -611,12 +673,18 @@ for aggregation in Aggregation_level:
             features['NDVI_crop_roll_mean'].fillna((features['NDVI_crop_roll_mean'].mean()), inplace=True)
             features['wd_roll_mean'].fillna((features['wd_roll_mean'].mean()), inplace=True)
             features['ds_roll_mean'].fillna((features['ds_roll_mean'].mean()), inplace=True)
+            features['sm_root_roll_mean'].fillna((features['sm_root_roll_mean'].mean()), inplace=True)
+            features['sm_surf_roll_mean'].fillna((features['sm_surf_roll_mean'].mean()), inplace=True)
+            features['acled_count_roll_mean'].fillna((features['acled_count_roll_mean'].mean()), inplace=True)
 
             features['NDVI_roll_mean_12'].fillna((features['NDVI_roll_mean_12'].mean()), inplace=True)
             features['NDVI_range_roll_mean_12'].fillna((features['NDVI_range_roll_mean_12'].mean()), inplace=True)
             features['NDVI_crop_roll_mean_12'].fillna((features['NDVI_crop_roll_mean_12'].mean()), inplace=True)
             features['wd_roll_mean_12'].fillna((features['wd_roll_mean_12'].mean()), inplace=True)
             features['ds_roll_mean_12'].fillna((features['ds_roll_mean_12'].mean()), inplace=True)
+            features['sm_root_roll_mean_12'].fillna((features['sm_root_roll_mean_12'].mean()), inplace=True)
+            features['sm_surf_roll_mean_12'].fillna((features['sm_surf_roll_mean_12'].mean()), inplace=True)
+            features['acled_count_roll_mean_12'].fillna((features['acled_count_roll_mean_12'].mean()), inplace=True)
 
             if with_TC==True: 
                 # fill nan values that came out of rolling
@@ -716,6 +784,10 @@ for aggregation in Aggregation_level:
                 # add all leads individually to the input dataframe
                 input_df=pd.concat([input_df,features_l], axis=0)
 
+    ############################################# Load clusters ##############################################   
+    clusters=pd.read_csv(BASE_FOLDER+'\\clusters.csv', index_col=0)
+    # add column to input df with cluster
+    input_df['cluster']=input_df['county'].map(clusters['max'])
 
     #################################################### END OF DATAFRAME CONSTRUCTION  ####################################################
     #########################################################################################################################
@@ -727,449 +799,463 @@ for aggregation in Aggregation_level:
     #####################################################################################################################
     ################################################### ML algorithms ###################################################
     #####################################################################################################################
-    
-    
+    if aggregation=='cluster':
+        cluster_list=list(clusters['max'].unique())
+
     ############# set aggregation level for ML training/testing############ 
-    if aggregation=='all':
+    elif aggregation=='all':
         counties=['all']
-    
+        cluster_list= ['no_cluster'] 
 
-    for i, county in enumerate(counties):
-        print('County: ', county)
-        # read in data
-
-        if aggregation=='county':
-            input_df2=input_df[input_df['county']==county]
-            input_df2.dropna(axis=1, how='all', inplace=True)# drop nan values when whole column is nan (CROP column)
-        else: 
-            input_df2=input_df.copy()   
+    elif aggregation=='county':
+        counties=list(input_df['county'].unique())
+        cluster_list=['no_cluster']
 
 
-    
-        
+    for cluster in cluster_list:
+        print ('Cluster: ', cluster)
+        if aggregation=='cluster':
+            input_df2=input_df[input_df['cluster']==cluster]
+            input_df2.dropna(axis=1, how='all', inplace=True)
 
-        ############################################### START LEAD TIME LOOP ###############################################
-        if forecast==True: 
-            for lead in leads: 
-                ############################################### Deleting NANs ###############################################
+        for i, county in enumerate(counties):
+            print('County: ', county)
+            # read in data
 
-                # For label (FEWS_CS)
-                input_df2=input_df2[input_df2['FEWS_CS'].notna()] # no nans 
-
-                # for labels --> extra crop/range nans are created due to the stacking of rows in the input_df
-                #crop ndvi columns
-                
-                
-                crop_cols=[col for col in input_df2.columns if 'crop' in col]
-                if len(crop_cols)>0:
-                    input_df2[crop_cols]=input_df2[crop_cols].fillna(input_df2.NDVI_crop.mean()) # fill nans of crop columns with mean of NDVI_crop column
-                # range ndvi columns
-                range_cols=[col for col in input_df2.columns if 'range' in col]
-                if len(range_cols)>0:
-                    input_df2[range_cols]=input_df2[range_cols].fillna(input_df2.NDVI_range.mean()) # fill nans of range columns with mean of NDVI_range column
-
-                # maize prices
-                maize_cols=[col for col in input_df2.columns if 'maize' in col]
-                if len(maize_cols)>0:
-                    input_df2[maize_cols]=input_df2[maize_cols].fillna(input_df2.maize_price.mean()) # fill nans of maize columns with mean of maize_price column
-                
-                ############################################### Select lead ###############################################
-                input_df3=input_df2[input_df2['lead']==lead]
-                
-
-
-                
-                ############################################### Sort by date ###############################################
-                if split_by_time==True:
-                    # sort on datetime index 
-                    input_df3=input_df3.sort_index()
-                
-                ############################################### Save county dataframe ##############################################
-                county_df=input_df3['county']
-
-                ############################################### Base prediction ###############################################
-                base1_preds=input_df3['base_forecast']
-
-                ############################################### Create features- labels ###############################################
-                labels=pd.Series(input_df3['FEWS_CS'])
-                features=input_df3.drop(['FEWS_CS','lead', 'base_forecast', 'county'], axis=1)
-
-                feature_list = list(features.columns)
-
-                ############################################### Training-test split ###############################################            
-                train_features, test_features, train_labels, test_labels = train_test_split(features, labels, test_size = 0.20,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
-                print ('training years = %s-%s, testing years= %s-%s' %(train_features.index.year[0],train_features.index.year[-1],test_features.index.year[0],test_features.index.year[-1]))
-                
-                
-
-                ############################################### Correlation analysis ###################################   
-                # correlations= features_l.drop(features_l.columns[-2:], axis=1).corr()
-
-                # mask = []
-                # for i in range(len(correlations.columns)):
-                #     mask_i = []
-                #     for j in range(len(correlations.columns)):
-                #         if i<j:
-                #             mask_i.append(True)
-                #         else: 
-                #             mask_i.append(False)
-                #     mask.append(mask_i)
-                # mask = np.array(mask)
-
-                # plt.figure(figsize=(20, 20), facecolor='w', edgecolor='k')
-                # sns.set(font_scale=1.2)
-                # sns.heatmap(correlations,cmap='coolwarm',
-                #             center = 0, 
-                #             annot=True,
-                #             fmt='.1g',
-                #             annot_kws={"fontsize":8},
-                #             mask=mask)
-                
-                # plt.title('Correlation matrix for %s months lead, county= %s'%(lead, county))
-                
-
-
-                
-
-                ############ create original fews_base values in shape of train_features and test_features ############# 
-                # fews_base_original=features['FEWS_base']
-
-                
-                # # original fews_base of the months present in train/test features 
-                # fews_base_original_train=fews_base_original.iloc[:len(train_features)] 
-                # fews_base_original_test=fews_base_original.iloc[-len(test_features):]
-
-                ############ create dates for training and testing set #############
-                train_dates=pd.DataFrame({'day':train_features.index.day, 'month':train_features.index.month, 'year':train_features.index.year})
-                test_dates=pd.DataFrame({'day':test_features.index.day, 'month':test_features.index.month, 'year':test_features.index.year})
-
-                ############ convert to numpy arrays #############
-                train_features_np = np.array(train_features)
-                test_features_np = np.array(test_features)
-                train_labels_np = np.array(train_labels)
-                test_labels_np = np.array(test_labels)
-                #fews_base_original_np=np.array(fews_base_original)
-                # fews_base_original_l_np=np.array(fews_base_original_l) ### CHECK: NOT USED
-                #fews_base_original_train_np=np.array(fews_base_original_train) ### CHECK: NOT USED
-                #fews_base_original_test_np=np.array(fews_base_original_test)
-                train_dates_np=np.array(train_dates) #real original time stamps 
-                test_dates_np=np.array(test_dates) #real original time stamps 
-
-                
-                ############################################### Baseline models ###############################################
-
-
-                ############################################### Baseline 1: use base_forecast as prediction ###############################################
-                # extract the base_forecast column from the test_features dataframe
-                base1_preds=base1_preds.iloc[-len(test_features):]
-
-
-
-                # plt.plot(base1_preds, label='Predictions')
-                # plt.plot(base1_truth, label='Truth')
-                # plt.plot(base1_errors, label='Errors')
-                # plt.legend()
-                # plt.show()
-
-                ############################################### Baseline 2: use train set seasonality as baseline ###############################################
-                # take training values of fews, for index with years < 2016. Calculate seasonality based on that (after 2015 there is a change in the months included in the fews datset)
-                
-                if aggregation=='all': 
-                    # reset index 
-                    train_labels_means=train_labels.reset_index()
-                    # calculate mean over same values in the 'index' column
-                    train_labels_means=train_labels_means.groupby('index').mean()
-                    train_labels_means=train_labels_means['FEWS_CS']
-                else: 
-                    train_labels_means=train_labels.copy() 
-
-                train_set_seasonality=train_labels_means.loc[train_labels_means.index.year<train_features.index.year[-1]]
-                seasonality=train_set_seasonality.groupby(train_set_seasonality.index.month).mean()
-                
-                # reindex the seasonality dataframe to the months of the year
-                seasonality=seasonality.reindex([1,2,3,4,5,6,7,8,9,10,11,12,1])
-
-                # interpolate the values using interpolation 
-                seasonality=seasonality.interpolate(method='linear', axis=0)
-                # make seasonality one row shorter (remove the last row!)
-                seasonality=seasonality.iloc[:-1]
-
-                # Assign these monthly values (from seasonality) to the test set, based on the month of the index
-                seasonality=seasonality.reindex(test_labels.index.month) #CHECK THIS LINE
-
-                # reset the index of the seasonality dataframe  
-                seasonality=seasonality.reset_index(drop=True)
-                # set the index of the seasonality dataframe to the index of the fews_base_original_test dataframe
-                seasonality.index=test_labels.index
-                
-
-                base2_preds= seasonality.copy()
-                base2_preds=pd.Series(base2_preds)
-
-
-
-                ############################################### Linear Regression ###############################################
-                regr = LinearRegression()
-                regr.fit(train_features_np, train_labels)
-                # Make predictions using the testing set
-                lr_preds = regr.predict(test_features_np)
-                # The coefficients
-                regr.score(test_features_np, test_labels)
-                regr.coef_
-                
-                ############################################### Random Forest ###############################################
-                # MIN SAMPLES LEAF =1 IS DANGEROUS! MAX DEPTH PRESENT OVERFITTING. MAX DEPTH=5 can still overfit (See lecture)
-                rf = RandomForestRegressor(n_estimators = 700,max_features='sqrt', n_jobs=-1, max_depth=5, min_samples_leaf=2, min_samples_split=5, random_state=40) # joris also uses max features  max_features='sqrt'
-                rf.get_params()
-
-                # Train the model on training data
-                model=rf.fit(train_features_np, train_labels)
-                
-                # Use the forest's predict method on the test data
-                predictions = rf.predict(test_features) ## rf predictions for the months with lead ahead 
-                
-                
-                ########################################## Visualize trees --> use dtreeviz package in future?  ###################################
+            if aggregation=='county':
+                input_df2=input_df[input_df['county']==county]
+                input_df2.dropna(axis=1, how='all', inplace=True)# drop nan values when whole column is nan (CROP column)
+            else: # all or cluster 
+                input_df2=input_df.copy()   
             
-                #Pull out one tree from the forest
-                os.chdir(TREE_FOLDER)
-                tree = rf.estimators_[5]# extracts 1 random tree from the forest
-                export_graphviz(tree, out_file = 'tree_L%s_%s.dot'%(lead,county), feature_names = feature_list, rounded = True, precision = 3)# Use dot file to create a graph
-                (graph, ) = pydot.graph_from_dot_file('tree_L%s_%s.dot'%(lead,county))# Write dot file to a png file
-                graph.write_png('tree_L%s_%s.png'%(lead,county)) 
-                # remove the dot file
-                os.remove('tree_L%s_%s.dot'%(lead,county))
 
 
-                ############################# feature importances #############################
-                ############# SCI-Kit Learn ################
+        
+            
 
-                # Get feature importances -->  computed as the mean and standard deviation of accumulation of the impurity decrease within each tree.
-                importances = list(rf.feature_importances_)# List of tuples with variable and importance
-                std = np.std([tree.feature_importances_ for tree in rf.estimators_], axis=0)
-                feature_importances = [(feature, round(importance, 2)) for feature, importance in zip(feature_list, importances)]# Sort the feature importances by most important first
+            ############################################### START LEAD TIME LOOP ###############################################
+            if forecast==True: 
+                for lead in leads: 
+                    ############################################### Deleting NANs ###############################################
+
+                    # For label (FEWS_CS)
+                    input_df2=input_df2[input_df2['FEWS_CS'].notna()] # no nans 
+
+                    # for labels --> extra crop/range nans are created due to the stacking of rows in the input_df
+                    #crop ndvi columns
+                    
+                    
+                    crop_cols=[col for col in input_df2.columns if 'crop' in col]
+                    if len(crop_cols)>0:
+                        input_df2[crop_cols]=input_df2[crop_cols].fillna(input_df2.NDVI_crop.mean()) # fill nans of crop columns with mean of NDVI_crop column
+                    # range ndvi columns
+                    range_cols=[col for col in input_df2.columns if 'range' in col]
+                    if len(range_cols)>0:
+                        input_df2[range_cols]=input_df2[range_cols].fillna(input_df2.NDVI_range.mean()) # fill nans of range columns with mean of NDVI_range column
+
+                    # maize prices
+                    maize_cols=[col for col in input_df2.columns if 'maize' in col]
+                    if len(maize_cols)>0:
+                        input_df2[maize_cols]=input_df2[maize_cols].fillna(input_df2.maize_price.mean()) # fill nans of maize columns with mean of maize_price column
+                    
+                    ############################################### Select lead ###############################################
+                    input_df3=input_df2[input_df2['lead']==lead]
+                    
+
+
+                    
+                    ############################################### Sort by date ###############################################
+                    if split_by_time==True:
+                        # sort on datetime index 
+                        input_df3=input_df3.sort_index()
+                    
+                    ############################################### Save county dataframe ##############################################
+                    county_df=input_df3['county']
+
+                    ############################################### Base prediction ###############################################
+                    base1_preds=input_df3['base_forecast']
+
+                    ############################################### Create features- labels ###############################################
+                    labels=pd.Series(input_df3['FEWS_CS'])
+                    features=input_df3.drop(['FEWS_CS','lead', 'base_forecast', 'county', 'cluster'], axis=1)
+
+                    feature_list = list(features.columns)
+
+                    ############################################### Training-test split ###############################################            
+                    train_features, test_features, train_labels, test_labels = train_test_split(features, labels, test_size = 0.20,shuffle=False) #25% of the data used for testing (38 time steps)   random_state = 42. if baseline2 state is not fixed, performance is different each time the code is run.
+                    print ('training years = %s-%s, testing years= %s-%s' %(train_features.index.year[0],train_features.index.year[-1],test_features.index.year[0],test_features.index.year[-1]))
+                    
+                    
+
+                    ############################################### Correlation analysis ###################################   
+                    # correlations= features_l.drop(features_l.columns[-2:], axis=1).corr()
+
+                    # mask = []
+                    # for i in range(len(correlations.columns)):
+                    #     mask_i = []
+                    #     for j in range(len(correlations.columns)):
+                    #         if i<j:
+                    #             mask_i.append(True)
+                    #         else: 
+                    #             mask_i.append(False)
+                    #     mask.append(mask_i)
+                    # mask = np.array(mask)
+
+                    # plt.figure(figsize=(20, 20), facecolor='w', edgecolor='k')
+                    # sns.set(font_scale=1.2)
+                    # sns.heatmap(correlations,cmap='coolwarm',
+                    #             center = 0, 
+                    #             annot=True,
+                    #             fmt='.1g',
+                    #             annot_kws={"fontsize":8},
+                    #             mask=mask)
+                    
+                    # plt.title('Correlation matrix for %s months lead, county= %s'%(lead, county))
+                    
+
+
+                    
+
+                    ############ create original fews_base values in shape of train_features and test_features ############# 
+                    # fews_base_original=features['FEWS_base']
+
+                    
+                    # # original fews_base of the months present in train/test features 
+                    # fews_base_original_train=fews_base_original.iloc[:len(train_features)] 
+                    # fews_base_original_test=fews_base_original.iloc[-len(test_features):]
+
+                    ############ create dates for training and testing set #############
+                    train_dates=pd.DataFrame({'day':train_features.index.day, 'month':train_features.index.month, 'year':train_features.index.year})
+                    test_dates=pd.DataFrame({'day':test_features.index.day, 'month':test_features.index.month, 'year':test_features.index.year})
+
+                    ############ convert to numpy arrays #############
+                    train_features_np = np.array(train_features)
+                    test_features_np = np.array(test_features)
+                    train_labels_np = np.array(train_labels)
+                    test_labels_np = np.array(test_labels)
+                    #fews_base_original_np=np.array(fews_base_original)
+                    # fews_base_original_l_np=np.array(fews_base_original_l) ### CHECK: NOT USED
+                    #fews_base_original_train_np=np.array(fews_base_original_train) ### CHECK: NOT USED
+                    #fews_base_original_test_np=np.array(fews_base_original_test)
+                    train_dates_np=np.array(train_dates) #real original time stamps 
+                    test_dates_np=np.array(test_dates) #real original time stamps 
+
+                    
+                    ############################################### Baseline models ###############################################
+
+
+                    ############################################### Baseline 1: use base_forecast as prediction ###############################################
+                    # extract the base_forecast column from the test_features dataframe
+                    base1_preds=base1_preds.iloc[-len(test_features):]
+
+
+
+                    # plt.plot(base1_preds, label='Predictions')
+                    # plt.plot(base1_truth, label='Truth')
+                    # plt.plot(base1_errors, label='Errors')
+                    # plt.legend()
+                    # plt.show()
+
+                    ############################################### Baseline 2: use train set seasonality as baseline ###############################################
+                    # take training values of fews, for index with years < 2016. Calculate seasonality based on that (after 2015 there is a change in the months included in the fews datset)
+                    
+                    if aggregation=='all': 
+                        # reset index 
+                        train_labels_means=train_labels.reset_index()
+                        # calculate mean over same values in the 'index' column
+                        train_labels_means=train_labels_means.groupby('index').mean()
+                        train_labels_means=train_labels_means['FEWS_CS']
+                    else: 
+                        train_labels_means=train_labels.copy() 
+
+                    train_set_seasonality=train_labels_means.loc[train_labels_means.index.year<train_features.index.year[-1]]
+                    seasonality=train_set_seasonality.groupby(train_set_seasonality.index.month).mean()
+                    
+                    # reindex the seasonality dataframe to the months of the year
+                    seasonality=seasonality.reindex([1,2,3,4,5,6,7,8,9,10,11,12,1])
+
+                    # interpolate the values using interpolation 
+                    seasonality=seasonality.interpolate(method='linear', axis=0)
+                    # make seasonality one row shorter (remove the last row!)
+                    seasonality=seasonality.iloc[:-1]
+
+                    # Assign these monthly values (from seasonality) to the test set, based on the month of the index
+                    seasonality=seasonality.reindex(test_labels.index.month) #CHECK THIS LINE
+
+                    # reset the index of the seasonality dataframe  
+                    seasonality=seasonality.reset_index(drop=True)
+                    # set the index of the seasonality dataframe to the index of the fews_base_original_test dataframe
+                    seasonality.index=test_labels.index
+                    
+
+                    base2_preds= seasonality.copy()
+                    base2_preds=pd.Series(base2_preds)
+
+
+
+                    ############################################### Linear Regression ###############################################
+                    regr = LinearRegression()
+                    regr.fit(train_features_np, train_labels)
+                    # Make predictions using the testing set
+                    lr_preds = regr.predict(test_features_np)
+                    # The coefficients
+                    regr.score(test_features_np, test_labels)
+                    regr.coef_
+                    
+                    ############################################### Random Forest ###############################################
+                    # MIN SAMPLES LEAF =1 IS DANGEROUS! MAX DEPTH PRESENT OVERFITTING. MAX DEPTH=5 can still overfit (See lecture)
+                    rf = RandomForestRegressor(n_estimators = 700,max_features='sqrt', n_jobs=-1, max_depth=5, min_samples_leaf=2, min_samples_split=5, random_state=40) # joris also uses max features  max_features='sqrt'
+                    rf.get_params()
+
+                    # Train the model on training data
+                    model=rf.fit(train_features_np, train_labels)
+                    
+                    # Use the forest's predict method on the test data
+                    predictions = rf.predict(test_features) ## rf predictions for the months with lead ahead 
+                    
+                    
+                    ########################################## Visualize trees --> use dtreeviz package in future?  ###################################
                 
-                # append featuer importances to df
-                # make a dataframe with 3 columns: importance, county, lead. Importances is a np.array. Attach the county and lead to the array and then make a df from it.
-                append= pd.DataFrame(importances, index=feature_list, columns=['importance'])
-                append['county']=county
-                append['lead']=lead
-                features_df_full=pd.concat([features_df_full, append], axis=0)
-
-                # sort feature importances and print most important feature
-                feature_importances = sorted(feature_importances, key = lambda x: x[1], reverse = True)
-                main_feature= feature_importances[0][0]
-                feature_imp= feature_importances[0][1]
-
-                ########### SHAP ################ Lundberg and Lee (2016) 
-                #Since we want the global importance, we average the absolute Shapley values per feature across the data:
-                explainer = shap.Explainer(model) # or TreeExplainer? Gives same result?
-                shap_explainer = explainer(train_features) # input what is used to fit the model 
-                shap_vals=explainer.shap_values(train_features)
+                    #Pull out one tree from the forest
+                    os.chdir(TREE_FOLDER)
+                    tree = rf.estimators_[5]# extracts 1 random tree from the forest
+                    export_graphviz(tree, out_file = 'tree_L%s_%s.dot'%(lead,county), feature_names = feature_list, rounded = True, precision = 3)# Use dot file to create a graph
+                    (graph, ) = pydot.graph_from_dot_file('tree_L%s_%s.dot'%(lead,county))# Write dot file to a png file
+                    graph.write_png('tree_L%s_%s.png'%(lead,county)) 
+                    # remove the dot file
+                    os.remove('tree_L%s_%s.dot'%(lead,county))
 
 
-                ############################################### Plotting section ###############################################
-                os.chdir(PLOT_FOLDER)
-                ################# Plot SHAP values #################
-                # summarize plot 
-                #shap.summary_plot(shap_values, features=features_l, feature_names=features_l.columns, plot_type='bar',title="Feature importance for %s, L%s"%(county,lead), show=False)
-                #plt.savefig(PLOT_FOLDER+'\\shap_summary_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
-                #plt.close()
+                    ############################# feature importances #############################
+                    ############# SCI-Kit Learn ################
 
-                # dependence plot
-                ranks=[0,1,2,3,4]# Rank 1,2,3,4
-                
-                for rank in ranks:
-                    shap.dependence_plot('rank(%s)'%rank, shap_vals, train_features, show=False)
-                    plt.title('Dependence plot for %s, L%s'%(county,lead))
-                    plt.savefig('shap_dependence_plot_L%s_%s_rank%s.png'%(lead,county,rank), bbox_inches='tight')
+                    # Get feature importances -->  computed as the mean and standard deviation of accumulation of the impurity decrease within each tree.
+                    importances = list(rf.feature_importances_)# List of tuples with variable and importance
+                    std = np.std([tree.feature_importances_ for tree in rf.estimators_], axis=0)
+                    feature_importances = [(feature, round(importance, 2)) for feature, importance in zip(feature_list, importances)]# Sort the feature importances by most important first
+                    
+                    # append featuer importances to df
+                    # make a dataframe with 3 columns: importance, county, lead. Importances is a np.array. Attach the county and lead to the array and then make a df from it.
+                    append= pd.DataFrame(importances, index=feature_list, columns=['importance'])
+                    append['county']=county
+                    append['lead']=lead
+                    features_df_full=pd.concat([features_df_full, append], axis=0)
+
+                    # sort feature importances and print most important feature
+                    feature_importances = sorted(feature_importances, key = lambda x: x[1], reverse = True)
+                    main_feature= feature_importances[0][0]
+                    feature_imp= feature_importances[0][1]
+
+                    ########### SHAP ################ Lundberg and Lee (2016) 
+                    #Since we want the global importance, we average the absolute Shapley values per feature across the data:
+                    explainer = shap.Explainer(model) # or TreeExplainer? Gives same result?
+                    shap_explainer = explainer(train_features) # input what is used to fit the model 
+                    shap_vals=explainer.shap_values(train_features)
+
+
+                    ############################################### Plotting section ###############################################
+                    os.chdir(PLOT_FOLDER)
+                    ################# Plot SHAP values #################
+                    
+                    # summarize plot 
+                    #shap.summary_plot(shap_values, features=features_l, feature_names=features_l.columns, plot_type='bar',title="Feature importance for %s, L%s"%(county,lead), show=False)
+                    #plt.savefig(PLOT_FOLDER+'\\shap_summary_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
+                    #plt.close()
+
+                    # dependence plot
+                    ranks=[0,1,2,3,4]# Rank 1,2,3,4
+                    
+                    for rank in ranks:
+                        shap.dependence_plot('rank(%s)'%rank, shap_vals, train_features, show=False)
+                        plt.title('Dependence plot for %s, L%s'%(county,lead))
+                        plt.savefig('shap_dependence_plot_L%s_%s_rank%s.png'%(lead,county,rank), bbox_inches='tight')
+                        plt.close()
+
+                    # beeswarm plot
+                    shap.plots.beeswarm(shap_explainer, show=False)
+                    plt.title('Beeswarm plot for %s, L%s'%(county,lead))
+                    plt.savefig('shap_beeswarm_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
                     plt.close()
 
-                # beeswarm plot
-                shap.plots.beeswarm(shap_explainer, show=False)
-                plt.title('Beeswarm plot for %s, L%s'%(county,lead))
-                plt.savefig('shap_beeswarm_plot_L%s_%s.png'%(lead,county), bbox_inches='tight')
-                plt.close()
+                    ################# Plot feature importances #################
 
-                ################# Plot feature importances #################
+                    ############################################### Change DIR to PLOT FOLDER ###############################################
+                    
 
-                ############################################### Change DIR to PLOT FOLDER ###############################################
-                
+                    #  Variable importances
+                    forest_importances = pd.Series(importances, index=feature_list)
 
-                #  Variable importances
-                forest_importances = pd.Series(importances, index=feature_list)
+                    fig, ax = plt.subplots()
+                    forest_importances.plot.bar(yerr=std, ax=ax)
 
-                fig, ax = plt.subplots()
-                forest_importances.plot.bar(yerr=std, ax=ax)
+                    
+                    ax.set_title("Feature importances using MDI for %s, L%s"%(county,lead))
+                    ax.set_ylabel("Mean decrease in impurity")
+                    ax.set_ylim(0,1)    
+                    fig.tight_layout()
+                    plt.savefig('Variable_Importances_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
+                    plt.show()
+                    plt.close()
 
-                
-                ax.set_title("Feature importances using MDI for %s, L%s"%(county,lead))
-                ax.set_ylabel("Mean decrease in impurity")
-                ax.set_ylim(0,1)    
-                fig.tight_layout()
-                plt.savefig('Variable_Importances_%s_L%s.png'%(county,lead), dpi=300, bbox_inches='tight')
-                plt.show()
-                plt.close()
+                    ################# reconstruct dataframe with predictions. Datestamps retrieved are "real" original datestampes from features df #################           
+                    ## attach county_df as column to train_features
+                    train_features['county']= county_df.iloc[:len(train_features)] # iloc works on a slice of the dataframe based on position! 
+                    test_features['county']= county_df.iloc[-len(test_features):] # iloc works on a slice of the dataframe based on position! 
+                    
+                    test_features.reset_index(inplace=True) # reset index to get the original datestamps
+                    train_features.reset_index(inplace=True) # reset index to get the original datestamps
+                    test_labels=pd.DataFrame(test_labels)
+                    test_labels.reset_index(inplace=True) # reset index to get the original datestamps
+                    train_labels=pd.DataFrame(train_labels)
+                    train_labels.reset_index(inplace=True) # reset index to get the original datestamps
 
-                ################# reconstruct dataframe with predictions. Datestamps retrieved are "real" original datestampes from features df #################           
-                ## attach county_df as column to train_features
-                train_features['county']= county_df.iloc[:len(train_features)] # iloc works on a slice of the dataframe based on position! 
-                test_features['county']= county_df.iloc[-len(test_features):] # iloc works on a slice of the dataframe based on position! 
-                
-                test_features.reset_index(inplace=True) # reset index to get the original datestamps
-                train_features.reset_index(inplace=True) # reset index to get the original datestamps
-                test_labels=pd.DataFrame(test_labels)
-                test_labels.reset_index(inplace=True) # reset index to get the original datestamps
-                train_labels=pd.DataFrame(train_labels)
-                train_labels.reset_index(inplace=True) # reset index to get the original datestamps
-
-                labels=pd.DataFrame(labels)
-                labels.reset_index(inplace=True) # reset index to get the original datestamps
-                
-                # predictions 
-                predictions= pd.DataFrame(predictions)
-                lr_preds= pd.DataFrame(lr_preds)
-                
-                # base predictions 
-                base1_preds= pd.DataFrame(base1_preds).reset_index().drop('index', axis=1)
-                base2_preds= pd.DataFrame(base2_preds).reset_index().drop('index', axis=1)
-                
-                # counties 
-                county_df2=pd.DataFrame(county_df) # counties from original input_df 
-                county_df2.reset_index(inplace=True) # reset index to get the original datestamps
-                # base predictions
-                
-                ############################################### Filter predictions per county  ###############################################
-                for c in list(county_df.unique()):
-                    ####################### select county data  ########################### 
-                    # labels 
-                    labels_county=labels.iloc[county_df2[county_df2['county']==c].index] # select county labels 
-                    test_labels_county=test_labels.iloc[test_features[test_features['county']==c].index].set_index('index') # select county test labels
-                    # features 
-                    features_county=features.iloc[county_df2[county_df2['county']==c].index] # select county features
-                    test_features_county=test_features.iloc[test_features[test_features['county']==c].index].set_index('index') # select county test features
+                    labels=pd.DataFrame(labels)
+                    labels.reset_index(inplace=True) # reset index to get the original datestamps
                     
                     # predictions 
-                    predictions_county=predictions.iloc[test_features[test_features['county']==c].index] # select county predictions
-                    lr_preds_county=lr_preds.iloc[test_features[test_features['county']==c].index]# select county predictions
+                    predictions= pd.DataFrame(predictions)
+                    lr_preds= pd.DataFrame(lr_preds)
                     
-                    # Base predictions 
-                    base1_preds_county=base1_preds.iloc[test_features[test_features['county']==c].index] # select county base predictions
-                    base2_preds_county=base2_preds.iloc[test_features[test_features['county']==c].index] # select county base predictions                
-
+                    # base predictions 
+                    base1_preds= pd.DataFrame(base1_preds).reset_index().drop('index', axis=1)
+                    base2_preds= pd.DataFrame(base2_preds).reset_index().drop('index', axis=1)
                     
-                    predictions_data = pd.DataFrame(data = {'date': test_labels_county.index, 'prediction': predictions_county.values.flatten(),'lr':lr_preds_county.values.flatten(), 'base1_preds':base1_preds_county.values.flatten(), 'base2_preds':base2_preds_county.values.flatten()}) # Dataframe with predictions and dates
-
-                    ######################### Evaluation #############################
-            
-                    # note: test_labels are for X months ahead, according to the lead
-                    test_values=test_labels_county.values.flatten() 
-                    ############################# general errors #############################
-                    base1_errors = abs(predictions_data['base1_preds'] - test_values)
-                    base2_errors = abs(predictions_data['base2_preds'] - test_values)        
-                    lr_errors = abs(predictions_data['lr'] - test_values)
-                    errors = abs(predictions_data['prediction'] - test_values)
-                                
-                    ############################# accuracy #############################
-                    # Calculate mean absolute percentage error (MAPE) 
-                    mape = 100 * (errors / test_values) 
-                    mape_baseline1= 100 * (base1_errors / test_values)
-                    mape_baseline2= 100 * (base2_errors / test_values)
-                    mape_lr= 100 * (lr_errors / test_values)
+                    # counties 
+                    county_df2=pd.DataFrame(county_df) # counties from original input_df 
+                    county_df2.reset_index(inplace=True) # reset index to get the original datestamps
+                    # base predictions
                     
-                    # Calculate and display accuracy
-                    accuracy = 100 - np.mean(mape)
-                    accuracy_baseline= 100 - np.mean(mape_baseline1)
-                    accuracy_baseline2= 100 - np.mean(mape_baseline2)
-                    accuracy_lr= 100 - np.mean(mape_lr)
+                    ############################################### Filter predictions per county  ###############################################
+                    for c in list(county_df.unique()):
+                        ####################### select county data  ########################### 
+                        # labels 
+                        labels_county=labels.iloc[county_df2[county_df2['county']==c].index] # select county labels 
+                        test_labels_county=test_labels.iloc[test_features[test_features['county']==c].index].set_index('index') # select county test labels
+                        # features 
+                        features_county=features.iloc[county_df2[county_df2['county']==c].index] # select county features
+                        test_features_county=test_features.iloc[test_features[test_features['county']==c].index].set_index('index') # select county test features
+                        
+                        # predictions 
+                        predictions_county=predictions.iloc[test_features[test_features['county']==c].index] # select county predictions
+                        lr_preds_county=lr_preds.iloc[test_features[test_features['county']==c].index]# select county predictions
+                        
+                        # Base predictions 
+                        base1_preds_county=base1_preds.iloc[test_features[test_features['county']==c].index] # select county base predictions
+                        base2_preds_county=base2_preds.iloc[test_features[test_features['county']==c].index] # select county base predictions                
 
-                    ############################# r2 score #############################
+                        
+                        predictions_data = pd.DataFrame(data = {'date': test_labels_county.index, 'prediction': predictions_county.values.flatten(),'lr':lr_preds_county.values.flatten(), 'base1_preds':base1_preds_county.values.flatten(), 'base2_preds':base2_preds_county.values.flatten()}) # Dataframe with predictions and dates
 
-                    # Explained variance score: 1 is perfect prediction
-                    var_score = r2_score(test_values, predictions_data['prediction'])
-                    var_score_baseline= r2_score(test_values, predictions_data['base1_preds'])
-                    var_score_baseline2= r2_score(test_values, predictions_data['base2_preds'])
-                    var_score_lr= r2_score(test_values, predictions_data['lr'])
+                        ######################### Evaluation #############################
+                
+                        # note: test_labels are for X months ahead, according to the lead
+                        test_values=test_labels_county.values.flatten() 
+                        ############################# general errors #############################
+                        base1_errors = abs(predictions_data['base1_preds'] - test_values)
+                        base2_errors = abs(predictions_data['base2_preds'] - test_values)        
+                        lr_errors = abs(predictions_data['lr'] - test_values)
+                        errors = abs(predictions_data['prediction'] - test_values)
+                                    
+                        ############################# accuracy #############################
+                        # Calculate mean absolute percentage error (MAPE) 
+                        mape = 100 * (errors / test_values) 
+                        mape_baseline1= 100 * (base1_errors / test_values)
+                        mape_baseline2= 100 * (base2_errors / test_values)
+                        mape_lr= 100 * (lr_errors / test_values)
+                        
+                        # Calculate and display accuracy
+                        accuracy = 100 - np.mean(mape)
+                        accuracy_baseline= 100 - np.mean(mape_baseline1)
+                        accuracy_baseline2= 100 - np.mean(mape_baseline2)
+                        accuracy_lr= 100 - np.mean(mape_lr)
 
-                    ############################# mean absolute error #############################
-                    mae = mean_absolute_error(test_values, predictions_data['prediction'])
-                    mae_baseline= mean_absolute_error(test_values, predictions_data['base1_preds'])
-                    mae_baseline2= mean_absolute_error(test_values, predictions_data['base2_preds'])
-                    mae_lr= mean_absolute_error(test_values, predictions_data['lr'])
+                        ############################# r2 score #############################
 
-                    ############################# mean squared error #############################
-                    mse = mean_squared_error(test_values, predictions_data['prediction'])
-                    mse_baseline= mean_squared_error(test_values, predictions_data['base1_preds'])
-                    mse_baseline2= mean_squared_error(test_values, predictions_data['base2_preds'])
-                    mse_lr= mean_squared_error(test_values, predictions_data['lr'])
+                        # Explained variance score: 1 is perfect prediction
+                        var_score = r2_score(test_values, predictions_data['prediction'])
+                        var_score_baseline= r2_score(test_values, predictions_data['base1_preds'])
+                        var_score_baseline2= r2_score(test_values, predictions_data['base2_preds'])
+                        var_score_lr= r2_score(test_values, predictions_data['lr'])
 
-                    ############################# root mean squared error ############################# 
-                    rmse = np.sqrt(mean_squared_error(test_values, predictions_data['prediction']))
-                    rmse_baseline= np.sqrt(mean_squared_error(test_values, predictions_data['base1_preds']))
-                    rmse_baseline2= np.sqrt(mean_squared_error(test_values, predictions_data['base2_preds']))
-                    rmse_lr= np.sqrt(mean_squared_error(test_values, predictions_data['lr']))
+                        ############################# mean absolute error #############################
+                        mae = mean_absolute_error(test_values, predictions_data['prediction'])
+                        mae_baseline= mean_absolute_error(test_values, predictions_data['base1_preds'])
+                        mae_baseline2= mean_absolute_error(test_values, predictions_data['base2_preds'])
+                        mae_lr= mean_absolute_error(test_values, predictions_data['lr'])
+
+                        ############################# mean squared error #############################
+                        mse = mean_squared_error(test_values, predictions_data['prediction'])
+                        mse_baseline= mean_squared_error(test_values, predictions_data['base1_preds'])
+                        mse_baseline2= mean_squared_error(test_values, predictions_data['base2_preds'])
+                        mse_lr= mean_squared_error(test_values, predictions_data['lr'])
+
+                        ############################# root mean squared error ############################# 
+                        rmse = np.sqrt(mean_squared_error(test_values, predictions_data['prediction']))
+                        rmse_baseline= np.sqrt(mean_squared_error(test_values, predictions_data['base1_preds']))
+                        rmse_baseline2= np.sqrt(mean_squared_error(test_values, predictions_data['base2_preds']))
+                        rmse_lr= np.sqrt(mean_squared_error(test_values, predictions_data['lr']))
 
 
-                    ############################### Evaluation stats per county ########################################
-                    var_list= [c,round(accuracy, 2), round(accuracy_baseline, 2), round(accuracy_baseline2, 2), round(accuracy_lr,2), round(var_score, 2), round(var_score_baseline, 2),round(var_score_baseline2, 2), round(var_score_lr,2), round(mse,2), round(mse_baseline,2), round(mse_baseline2,2), round(mse_lr,2), round(mae,2), round(mae_baseline,2), round(mae_baseline2,2), round(mae_lr,2),lead]         
-                    stats_df.loc[len(stats_df), :] = var_list
+                        ############################### Evaluation stats per county ########################################
+                        var_list= [c,round(accuracy, 2), round(accuracy_baseline, 2), round(accuracy_baseline2, 2), round(accuracy_lr,2), round(var_score, 2), round(var_score_baseline, 2),round(var_score_baseline2, 2), round(var_score_lr,2), round(mse,2), round(mse_baseline,2), round(mse_baseline2,2), round(mse_lr,2), round(mae,2), round(mae_baseline,2), round(mae_baseline2,2), round(mae_lr,2),lead]         
+                        stats_df.loc[len(stats_df), :] = var_list
 
-                    ############################################### Plot predictions ###############################################
+                        ############################################### Plot predictions ###############################################
 
-                    #load target obs
-                    target_obs=labels_county.set_index('index').copy()
-                    #load feature obs
-                    #extract names from 2 most important features from feature importance tuples 
+                        #load target obs
+                        target_obs=labels_county.set_index('index').copy()
+                        #load feature obs
+                        #extract names from 2 most important features from feature importance tuples 
 
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    # Plot the actual values
-                    plt.plot(target_obs.index,target_obs['FEWS_CS'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
-                    
-                    # plot base predictions
-                    plt.plot(predictions_data['date'], predictions_data['base1_preds'], 'go', label = 'base1 prediction (future based on last observed value)')
-                    plt.plot(predictions_data['date'], predictions_data['base2_preds'], 'yo', label = 'base2 prediction (future based on train data seasonality)')
-                    
-                    # plot rf predictions
-                    plt.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'Random Forest prediction')
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        # Plot the actual values
+                        plt.plot(target_obs.index,target_obs['FEWS_CS'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
+                        
+                        # plot base predictions
+                        plt.plot(predictions_data['date'], predictions_data['base1_preds'], 'go', label = 'base1 prediction (future based on last observed value)')
+                        plt.plot(predictions_data['date'], predictions_data['base2_preds'], 'yo', label = 'base2 prediction (future based on train data seasonality)')
+                        
+                        # plot rf predictions
+                        plt.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'Random Forest prediction')
 
-                    #plot lr predictions
-                    #plt.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
-                    
-                    plt.xticks(rotation = '60'); 
-                    plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('FEWS observations vs RF predictions for L=%s, county= %s. Accuracy=%s'%(lead,c,round(accuracy, 2)));
-                    plt.legend(loc='best')
-                    plt.savefig('TS_%s_L%s.png'%(c,lead), dpi=300, bbox_inches='tight')
-                    plt.show() 
-                    plt.close()
+                        #plot lr predictions
+                        #plt.plot(predictions_data['date'], predictions_data['lr'], 'mo', label = 'Linear regression prediction')
+                        
+                        plt.xticks(rotation = '60'); 
+                        plt.xlabel('Date'); plt.ylabel('FEWS IPC class'); plt.title('FEWS observations vs RF predictions for L=%s, county= %s. Accuracy=%s'%(lead,c,round(accuracy, 2)));
+                        plt.legend(loc='best')
+                        plt.savefig('TS_%s_L%s.png'%(c,lead), dpi=300, bbox_inches='tight')
+                        plt.show() 
+                        plt.close()
 
-                    #Select features --> CHECK
-                    feature1, feature2=feature_importances[0][0], feature_importances[1][0]
-                    feature_obs=features_county[[feature1,feature2]]
-                    feature_obs=feature_obs.loc[feature_obs.index>=target_obs.index[0]]
+                        #Select features --> CHECK
+                        feature1, feature2=feature_importances[0][0], feature_importances[1][0]
+                        feature_obs=features_county[[feature1,feature2]]
+                        feature_obs=feature_obs.loc[feature_obs.index>=target_obs.index[0]]
 
-                    ################# Plot explanatory line graph #################
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    ax2=ax.twinx()
-                    
-                    # Plot the actual values
-                    ax.plot(target_obs.index,target_obs['FEWS_CS'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
-                    # plot rf predictions 
-                    ax.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'random Forest prediction')
-                    
-                    # plot base predictions         
+                        ################# Plot explanatory line graph #################
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        ax2=ax.twinx()
+                        
+                        # Plot the actual values
+                        ax.plot(target_obs.index,target_obs['FEWS_CS'], 'b-', label = 'Observed FEWS class')# Plot the predicted values
+                        # plot rf predictions 
+                        ax.plot(predictions_data['date'], predictions_data['prediction'], 'ro', label = 'random Forest prediction')
+                        
+                        # plot base predictions         
 
-                    # plot features
-                    ax2.plot(feature_obs.index, feature_obs[feature1], 'o-', color='orange', label = feature1)# Plot the predicted values
-                    ax2.plot(feature_obs.index, feature_obs[feature2], 'o-', color='black', label = feature2)# Plot the predicted values
-                    
-                    plt.xticks(rotation = '60'); 
-                    plt.xlabel('Date'); plt.ylabel('feature value'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(c,lead,round(accuracy, 2)));
-                    plt.legend()
-                    plt.savefig('Explanatory_plot_%s_L%s.png'%(c,lead), dpi=300, bbox_inches='tight')
-                    
-                    plt.show() 
-                    plt.close()
-            
+                        # plot features
+                        ax2.plot(feature_obs.index, feature_obs[feature1], 'o-', color='orange', label = feature1)# Plot the predicted values
+                        ax2.plot(feature_obs.index, feature_obs[feature2], 'o-', color='black', label = feature2)# Plot the predicted values
+                        
+                        plt.xticks(rotation = '60'); 
+                        plt.xlabel('Date'); plt.ylabel('feature value'); plt.title('Explanatory_plot for %s,L=%s. Accuracy=%s'%(c,lead,round(accuracy, 2)));
+                        plt.legend()
+                        plt.savefig('Explanatory_plot_%s_L%s.png'%(c,lead), dpi=300, bbox_inches='tight')
+                        
+                        plt.show() 
+                        plt.close()
+                
 
 
 
@@ -1297,31 +1383,26 @@ for aggregation in Aggregation_level:
 
 
 
-    # loop over the leads
-    for i,lead in enumerate(leads): 
-        # get lead 2 var scores
-        stats_df_lead2=stats_df.loc[stats_df['lead']==lead][['var_score','county']]
+    # spatial plot 
+    # for i,lead in enumerate(leads): 
+    #     # get lead 2 var scores
+    #     stats_df_lead2=stats_df.loc[stats_df['lead']==lead][['var_score','county']]
 
-        # load shapefile with county boundaries in Kenya using geopandas
-        county_sf=gpd.read_file('C:/Users/tbr910/Documents/Forecast_action_analysis/vector_data/geo_boundaries/Kenya/County.shp')
-        county_sf=county_sf.set_index('OBJECTID')
-        county_sf.rename(columns={'COUNTY':'county'}, inplace=True)  
+    #     # add the geometries to the stats_df_lead2 df based on the county name
+    #     gdf_scores=pd.merge(stats_df_lead2, county_sf, on='county')[['county', 'var_score', 'geometry']]
 
-        # add the geometries to the stats_df_lead2 df based on the county name
-        gdf_scores=pd.merge(stats_df_lead2, county_sf, on='county')[['county', 'var_score', 'geometry']]
+    #     # convert to geodataframe
+    #     gdf_scores=gpd.GeoDataFrame(gdf_scores, geometry='geometry')
+    #     gdf_scores=gdf_scores.set_crs(epsg=4326)
 
-        # convert to geodataframe
-        gdf_scores=gpd.GeoDataFrame(gdf_scores, geometry='geometry')
-        gdf_scores=gdf_scores.set_crs(epsg=4326)
-
-        # plot the geodataframe, with a fixed colorbar
-        fig, ax = plt.subplots(1, figsize=(10, 10))
-        gdf_scores.plot(column='var_score', ax=ax, legend=True, vmin=0,vmax=0.5, cmap='OrRd')
-        ax.set_title('Variance explained for lead %s'%(lead))
-        ax.set_axis_off()
-        plt.tight_layout()
-        plt.show()
-        # save plot in plots folder
+    #     # plot the geodataframe, with a fixed colorbar
+    #     fig, ax = plt.subplots(1, figsize=(10, 10))
+    #     gdf_scores.plot(column='var_score', ax=ax, legend=True, vmin=0,vmax=0.5, cmap='OrRd')
+    #     ax.set_title('Variance explained for lead %s'%(lead))
+    #     ax.set_axis_off()
+    #     plt.tight_layout()
+    #     plt.show()
+    #     # save plot in plots folder
 
 
     #%% save results
