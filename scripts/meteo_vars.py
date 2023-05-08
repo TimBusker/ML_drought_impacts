@@ -7,9 +7,8 @@ Created on Wed Jan 18 14:55:34 2023
 
 import os 
 import xarray as xr
-import xclim as xc
+
 from datetime import datetime
-from xclim.indices import standardized_precipitation_index
 import matplotlib.pyplot as plt
 os.chdir('C:\\Users\\tbr910\\Documents\\Forecast_action_analysis')
 import sys
